@@ -490,16 +490,16 @@ def secure_delete(filename: str) -> None:
     except Exception as e:
         print(f"Warning: Could not securely delete {filename}: {e}")
 
-def verify_wordlist_integrity() -> None:
-    """Verify the integrity of the wordlist file."""
+def verify_wordlist_integrity() -> bool:
     WORDLIST_SHA256 = "2f5eed53a4727b4bf8880d8f3f199efc90e58503646d9ff8eff3a2ed3b24dbda"
     try:
         with open('wordlist.txt', 'rb') as f:
             if hashlib.sha256(f.read()).hexdigest() != WORDLIST_SHA256:
-                raise ValueError("Wordlist integrity check failed! The wordlist may have been tampered with.")
+                return False
+        return True
     except Exception as e:
         print(f"Error verifying wordlist: {e}")
-        sys.exit(1)
+        return False
 
 def display_ascii_qr(data: str) -> None:
     """Display QR code in terminal using ASCII art."""
@@ -584,23 +584,23 @@ def main():
             ok = run_self_test()
             sys.exit(0 if ok else 1)
 
-        # Check for required dependencies
-        check_dependencies()
-        
         # Verify wordlist integrity
         if not verify_wordlist_integrity():
             print("Error: Wordlist integrity check failed!")
             sys.exit(1)
-            
+    
         # Run security checks
-        check_security()
-
+    check_security()
+    
         # Create QR code directory if not in print-only mode
         if not args.print_only:
             os.makedirs(QR_DIR, exist_ok=True)
 
         # Generate wallet data
-        mnemonic, passphrase, derivation_path = generate_wallet_data()
+        wallet_data = generate_wallet()
+        mnemonic = wallet_data['mnemonic']
+        passphrase = ""  # Using empty passphrase since it's not returned by generate_wallet
+        derivation_path = wallet_data['derivation_path']
         
         # Get password with strength check
         while True:

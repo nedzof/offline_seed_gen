@@ -9,6 +9,7 @@ import hmac
 from bitcoinx import PrivateKey, PublicKey, BIP32PrivateKey, BIP32PublicKey, Network, Bitcoin, bip32_key_from_string
 import subprocess
 import socket
+import random
 
 # Add lib directory to Python path
 sys.path.append(os.path.join(os.path.dirname(__file__), 'lib'))
@@ -227,6 +228,46 @@ if __name__ == '__main__':
             with open(filename, 'w') as f:
                 f.write(encrypted)
             print(f"File {filename} has been encrypted.")
+    else:
+        # Generate 3 random indices based on the seed
+        seed_bytes = bytes.fromhex(wallet['seed'])
+        indices = [int.from_bytes(seed_bytes[i:i+4], 'big') % 12 for i in range(0, 12, 4)][:3]
+        
+        # Get the words at those indices
+        words = wallet['mnemonic'].split()
+        verification_words = [words[i] for i in indices]
+        
+        print("\n⚠️  IMPORTANT: Please verify that you have saved your seed phrase!")
+        print("To verify, please select the correct word for each position:")
+        
+        for i, word in enumerate(verification_words):
+            # Generate 3 random options including the correct word
+            all_words = set(words)  # Get all unique words
+            options = random.sample(list(all_words - {word}), 2)  # Get 2 random different words
+            options.append(word)  # Add the correct word
+            random.shuffle(options)  # Shuffle the options
+            
+            print(f"\nPosition {indices[i] + 1}:")
+            for j, opt in enumerate(options, 1):
+                print(f"{j}. {opt}")
+            
+            while True:
+                try:
+                    choice = int(input(f"Select the correct word for position {indices[i] + 1} (1-3): "))
+                    if 1 <= choice <= 3:
+                        if options[choice-1] == word:
+                            print("✓ Correct!")
+                            break
+                        else:
+                            print("✗ Incorrect! Please try again.")
+                    else:
+                        print("Please enter a number between 1 and 3.")
+                except ValueError:
+                    print("Please enter a valid number.")
+        
+        print("\n✓ Verification complete! Please make sure you have securely saved your seed phrase.")
+        print("Remember: If you lose your seed phrase, you will lose access to your funds!")
+
     # Verify addresses
     seed_bytes = bytes.fromhex(wallet['seed'])
     master_key_obj = bip32_key_from_string(wallet['master_key_xprv'])

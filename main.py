@@ -534,18 +534,21 @@ def generate_qr(data: str, filename: str, chunk_size: int = 800) -> None:
                 last_five = addresses[-5:]
                 
                 # Draw first 5 addresses
-                y_pos = positions[chunk_num-1][1] - 5 * mm
-                c.setFont("Helvetica", 6)
+                y_pos = positions[chunk_num-1][1] - 8 * mm  # Increased spacing
+                c.setFont("Helvetica-Bold", 8)  # Increased font size and made bold
                 c.drawString(positions[chunk_num-1][0], y_pos, "First 5 addresses:")
+                c.setFont("Helvetica", 7)  # Slightly smaller for addresses
                 for i, addr in enumerate(first_five):
-                    y_pos -= 3 * mm
+                    y_pos -= 4 * mm  # Increased spacing between addresses
                     c.drawString(positions[chunk_num-1][0], y_pos, f"{i+1}. {addr}")
                 
                 # Draw last 5 addresses
-                y_pos -= 3 * mm
+                y_pos -= 4 * mm  # Extra spacing between sections
+                c.setFont("Helvetica-Bold", 8)
                 c.drawString(positions[chunk_num-1][0], y_pos, "Last 5 addresses:")
+                c.setFont("Helvetica", 7)
                 for i, addr in enumerate(last_five):
-                    y_pos -= 3 * mm
+                    y_pos -= 4 * mm
                     c.drawString(positions[chunk_num-1][0], y_pos, f"{i+1}. {addr}")
                 
                 # If we've filled a page, start a new one

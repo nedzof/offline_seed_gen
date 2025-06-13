@@ -12,20 +12,23 @@ import argparse
 import subprocess
 import ctypes
 import re
+import shutil
 from typing import Tuple, Optional, List, Dict
 from pathlib import Path
-from Cryptodome.Cipher import AES
-from Cryptodome.Protocol.KDF import PBKDF2
-from Cryptodome.Random import get_random_bytes
-import qrcode
-from qrcode.constants import ERROR_CORRECT_L
-from bitcoinx import BIP32PrivateKey, BIP32PublicKey, Network, Bitcoin
-from Cryptodome.Hash import SHA256
 
 # Add lib directory to Python path
 lib_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'lib')
 if lib_path not in sys.path:
     sys.path.insert(0, lib_path)
+
+# Import local dependencies
+from Cryptodome.Cipher import AES
+from Cryptodome.Protocol.KDF import PBKDF2
+from Cryptodome.Random import get_random_bytes
+from Cryptodome.Hash import SHA256
+import qrcode
+from qrcode.constants import ERROR_CORRECT_L
+from bitcoinx import BIP32PrivateKey, BIP32PublicKey, Network, Bitcoin
 
 # Constants
 VERSION = "1.0"
@@ -394,32 +397,28 @@ def derive_addresses(master_key: BIP32PrivateKey, derivation_path: str, count: i
     return addresses
 
 def generate_wallet(entropy_length: int = 16, passphrase: str = "", derivation_path: str = "m/44'/236'/0'") -> Dict:
-    """Generate a new wallet with the specified entropy length, passphrase, and derivation path."""
+    """Generate a new wallet with the specified parameters."""
     # Generate entropy
     entropy = generate_entropy(entropy_length)
-    entropy_hex = entropy.hex()
     
     # Convert entropy to mnemonic
-    mnemonic = entropy_to_mnemonic(entropy_hex)
+    mnemonic = entropy_to_mnemonic(entropy.hex())
     
-    # Convert mnemonic to seed
+    # Generate seed from mnemonic and passphrase
     seed = mnemonic_to_seed(mnemonic, passphrase)
     
-    # Convert seed to master key
+    # Generate master key
     master_key = seed_to_master_key(seed)
     
-    # Derive addresses
-    addresses = derive_addresses(master_key, derivation_path)
-    
-    return {
-        'entropy': entropy_hex,
+    # Create wallet info dictionary
+    wallet_info = {
         'mnemonic': mnemonic,
-        'seed': seed.hex(),
-        'master_key_hex': master_key.to_hex(),
-        'master_key_xprv': master_key.to_extended_key_string(),
-        'addresses': addresses,
-        'derivation_path': derivation_path
+        'passphrase': passphrase,
+        'derivation_path': derivation_path,
+        'version': VERSION
     }
+    
+    return wallet_info
 
 def secure_erase_histories():
     """Securely erase shell and Python history files."""
@@ -520,21 +519,11 @@ def display_ascii_qr(data: str) -> None:
         print(data)
 
 def generate_qr(data: str, filename: str, paranoid: bool = False, print_only: bool = False) -> None:
-    """Generate QR code for air-gapped transfer"""
+    """Generate QR code from data."""
     try:
-        if print_only:
-            print(f"\n[PRINT-ONLY MODE] ASCII QR Code for {os.path.basename(filename)}:")
-            display_ascii_qr(data)
-            return
-
-        if paranoid:
-            print(f"\n[PARANOID MODE] ASCII QR Code for {os.path.basename(filename)}:")
-            display_ascii_qr(data)
-            return
-
-        # Generate QR code
+        # Create QR code
         qr = qrcode.QRCode(
-            version=1,
+            version=None,  # Auto-determine version
             error_correction=ERROR_CORRECT_L,
             box_size=10,
             border=4,
@@ -542,24 +531,19 @@ def generate_qr(data: str, filename: str, paranoid: bool = False, print_only: bo
         qr.add_data(data)
         qr.make(fit=True)
         
-        # Create QR code image
+        # Create image
         img = qr.make_image(fill_color="black", back_color="white")
         
-        # Save QR code
-        img.save(filename)
-        print(f"\nQR code saved to: {filename}")
+        # Save image if not in paranoid mode
+        if not paranoid and not print_only:
+            os.makedirs(QR_DIR, exist_ok=True)
+            img.save(os.path.join(QR_DIR, filename))
         
-        # Also display ASCII version
-        print(f"\nASCII QR Code for {os.path.basename(filename)}:")
+        # Display ASCII QR code
         display_ascii_qr(data)
         
     except Exception as e:
-        print(f"\nError generating QR code: {e}")
-        print("Falling back to text-based transfer...")
-        print("\nText data for manual transfer:")
-        print("-" * 40)
-        print(data)
-        print("-" * 40)
+        raise Exception(f"QR code generation failed: {e}")
 
 def generate_encrypted_qr(data: str, password: str, filename: str) -> None:
     """Generate an encrypted QR code for secure air-gapped transfer."""
@@ -570,61 +554,46 @@ def generate_encrypted_qr(data: str, password: str, filename: str) -> None:
         print(f"Warning: Could not generate encrypted QR data: {e}")
 
 def main():
-    """Main function to generate and encrypt wallet data"""
+    """Main function."""
     try:
-        # Parse command line arguments
-        parser = argparse.ArgumentParser(description='Generate and encrypt wallet data')
-        parser.add_argument('--paranoid', action='store_true', help='Paranoid mode: ASCII QR only')
-        parser.add_argument('--print-only', action='store_true', help='Print-only mode: No file output')
-        parser.add_argument('--selftest', action='store_true', help='Run self-test mode')
-        args = parser.parse_args()
-
-        # Run self-test if requested
-        if args.selftest:
-            ok = run_self_test()
-            sys.exit(0 if ok else 1)
-
-        # Verify wordlist integrity
-        if not verify_wordlist_integrity():
-            print("Error: Wordlist integrity check failed!")
-            sys.exit(1)
-    
         # Run security checks
-    check_security()
-    
-        # Create QR code directory if not in print-only mode
-        if not args.print_only:
-            os.makedirs(QR_DIR, exist_ok=True)
-
-        # Generate wallet data
-        wallet_data = generate_wallet()
-        mnemonic = wallet_data['mnemonic']
-        passphrase = ""  # Using empty passphrase since it's not returned by generate_wallet
-        derivation_path = wallet_data['derivation_path']
+        check_security()
         
-        # Get password with strength check
+        # Get password for encryption
         while True:
-            password = getpass.getpass("\nEnter password to encrypt wallet data: ")
+            password = getpass.getpass("Enter password to encrypt wallet data: ")
             if check_password_strength(password):
                 break
             print("Password does not meet security requirements. Please try again.")
         
+        # Generate wallet
+        wallet_info = generate_wallet()
+        
         # Encrypt wallet data
-        encrypted_data = encrypt_wallet_data(mnemonic, passphrase, derivation_path, password)
+        encrypted_data = encrypt_wallet_data(
+            wallet_info['mnemonic'],
+            wallet_info['passphrase'],
+            wallet_info['derivation_path'],
+            password
+        )
         
-        # Save encrypted data if not in print-only mode
-        if not args.print_only:
-            with open('wallet_info.txt', 'w') as f:
-                f.write(encrypted_data)
-            print("\nEncrypted wallet data saved to wallet_info.txt")
+        # Save encrypted data
+        with open("wallet_info.txt", "w") as f:
+            f.write(encrypted_data)
         
-        # Generate QR codes
-        print("\nGenerating QR codes for air-gapped transfer...")
-        generate_qr(mnemonic, os.path.join(QR_DIR, 'mnemonic.png'), args.paranoid, args.print_only)
-        generate_qr(passphrase, os.path.join(QR_DIR, 'passphrase.png'), args.paranoid, args.print_only)
-        generate_qr(derivation_path, os.path.join(QR_DIR, 'derivation_path.png'), args.paranoid, args.print_only)
+        print("\nEncrypted wallet data saved to wallet_info.txt")
         
-        # Print final instructions
+        # Ask if user wants QR code
+        if input("\nDo you want to generate a QR code with all wallet information? (y/n): ").lower() == 'y':
+            print("\nGenerating QR code for air-gapped transfer...")
+            qr_data = json.dumps({
+                'mnemonic': wallet_info['mnemonic'],
+                'passphrase': wallet_info['passphrase'],
+                'derivation_path': wallet_info['derivation_path'],
+                'version': wallet_info['version']
+            })
+            generate_qr(qr_data, "wallet_info.png", paranoid=True)
+        
         print("\nIMPORTANT: Keep your seed phrase and derivation path safe!")
         print("1. Write down the seed phrase and keep it in a secure location")
         print("2. Remember your passphrase")
@@ -632,15 +601,15 @@ def main():
         print("4. Never share your private keys")
         print("5. Consider using a hardware wallet for large amounts")
         
-        # Ask about secure exit
+        # Ask about secure history erasure
         if input("\nDo you want to securely erase shell and Python history? (y/n): ").lower() == 'y':
-            secure_exit()
-            
-    except KeyboardInterrupt:
-        print("\nOperation cancelled by user.")
-        sys.exit(1)
+            secure_erase_histories()
+        
+        # Secure exit
+        secure_exit()
+        
     except Exception as e:
-        print(f"\nError: {e}")
+        print(f"Error: {e}")
         sys.exit(1)
 
 if __name__ == '__main__':

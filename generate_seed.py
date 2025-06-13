@@ -177,4 +177,9 @@ if __name__ == '__main__':
     if all_match:
         print("Verification successful: All addresses match.")
     else:
-        print("Verification failed: Addresses do not match.") 
+        print("Verification failed: Addresses do not match.")
+    # Write 1000 addresses to 'addresses' file
+    addresses_1000 = derive_addresses(BIP32PrivateKey.from_seed(bytes.fromhex(wallet['seed']), Bitcoin), 1000)
+    with open('addresses', 'w') as f:
+        for addr in addresses_1000:
+            f.write(addr + '\n') 

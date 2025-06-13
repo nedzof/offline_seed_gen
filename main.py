@@ -523,15 +523,15 @@ def generate_p2pkh_addresses(mnemonic: str, passphrase: str, derivation_path: st
         # Derive the path
         for part in path_parts[1:]:  # Skip 'm'
             if part.endswith("'"):
-                current_key = current_key.derive(int(part[:-1]), is_hardened=True)
+                current_key = current_key.child(int(part[:-1]), is_hardened=True)
             else:
-                current_key = current_key.derive(int(part))
+                current_key = current_key.child(int(part))
         
         # Generate addresses
         addresses = []
         for i in range(count):
             # Derive child key for each address
-            child_key = current_key.derive(i)
+            child_key = current_key.child(i)
             # Get public key
             public_key = child_key.public_key
             # Generate P2PKH address

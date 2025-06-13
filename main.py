@@ -252,6 +252,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument('--paranoid', action='store_true', help='Paranoid mode: ASCII QR only')
     parser.add_argument('--print-only', action='store_true', help='Print-only mode: No file output')
     parser.add_argument('--selftest', action='store_true', help='Run self-test mode')
+    parser.add_argument('--addresses', type=int, default=0, help='Generate QR code with specified number of addresses (default: 0)')
     return parser.parse_args()
 
 def check_security() -> None:
@@ -516,6 +517,44 @@ def generate_encrypted_qr(data: str, password: str, filename: str) -> None:
     except Exception as e:
         print(f"Warning: Could not generate encrypted QR data: {e}")
 
+def generate_multiple_addresses(mnemonic: str, passphrase: str, derivation_path: str, count: int = 1000) -> List[Dict[str, str]]:
+    """Generate multiple addresses from the same seed."""
+    try:
+        # Convert mnemonic to seed
+        seed = mnemonic_to_seed(mnemonic, passphrase)
+        
+        # Create master key
+        master_key = BIP32PrivateKey.from_seed(seed, network=Bitcoin)
+        
+        # Parse derivation path
+        path_parts = derivation_path.split('/')
+        if path_parts[0] != 'm':
+            raise ValueError("Invalid derivation path: must start with 'm'")
+        
+        # Get the base path without the last index
+        base_path = '/'.join(path_parts[:-1])
+        base_key = master_key.derive_path(base_path)
+        
+        # Generate addresses
+        addresses = []
+        for i in range(count):
+            # Derive child key
+            child_key = base_key.derive(i)
+            public_key = child_key.public_key
+            
+            # Get address
+            address = public_key.to_address()
+            
+            addresses.append({
+                'index': i,
+                'address': str(address),
+                'derivation_path': f"{base_path}/{i}"
+            })
+        
+        return addresses
+    except Exception as e:
+        raise Exception(f"Failed to generate addresses: {e}")
+
 def main():
     """Main function."""
     try:
@@ -560,7 +599,27 @@ def main():
                 f.write(encrypted_data)
             print("\nEncrypted wallet data saved to wallet_info.txt")
         
-        # Ask if user wants QR code
+        # Generate addresses QR code if requested
+        if args.addresses > 0:
+            print(f"\nGenerating QR code with {args.addresses} addresses...")
+            addresses = generate_multiple_addresses(
+                wallet_info['mnemonic'],
+                wallet_info['passphrase'],
+                wallet_info['derivation_path'],
+                args.addresses
+            )
+            
+            # Create QR data with addresses
+            qr_data = json.dumps({
+                'version': wallet_info['version'],
+                'addresses': addresses
+            }, indent=2)
+            
+            # Generate QR code
+            generate_qr(qr_data, "addresses.png", args.paranoid, args.print_only)
+            print(f"Generated QR code with {len(addresses)} addresses")
+        
+        # Ask if user wants QR code for wallet info
         if input("\nDo you want to generate a QR code with all wallet information? (y/n): ").lower() == 'y':
             print("\nGenerating QR code for air-gapped transfer...")
             qr_data = json.dumps({

@@ -632,8 +632,24 @@ def generate_qr_pdf(data: str, filename: str, paranoid: bool = False, print_only
                     temp_path = os.path.join(QR_DIR, f"temp_qr_{i}.png")
                     img.save(temp_path)
                     c.drawImage(temp_path, x, y, width=qr_size, height=qr_size)
-                    c.setFont("Helvetica", 10)  # Keep the same font size
+                    
+                    # Add QR number
+                    c.setFont("Helvetica", 10)
                     c.drawString(x, y - 8, f"QR {i+1}/{len(chunks)}")
+                    
+                    # Add address preview
+                    try:
+                        # Try to parse the chunk as JSON to get the address
+                        chunk_data = json.loads(chunk)
+                        if isinstance(chunk_data, list) and len(chunk_data) > 0:
+                            address = chunk_data[0].get('address', '')
+                            if address:
+                                preview = f"{address[:6]}...{address[-6:]}"
+                                c.setFont("Helvetica", 8)
+                                c.drawString(x, y - 20, preview)
+                    except:
+                        pass
+                    
                     os.remove(temp_path)
                     qr_count += 1
                 except Exception as e:
@@ -660,8 +676,24 @@ def generate_qr_pdf(data: str, filename: str, paranoid: bool = False, print_only
                     temp_path = os.path.join(QR_DIR, f"temp_qr_{i}_small.png")
                     img.save(temp_path)
                     c.drawImage(temp_path, x, y, width=qr_size, height=qr_size)
-                    c.setFont("Helvetica", 10)  # Keep the same font size
+                    
+                    # Add QR number
+                    c.setFont("Helvetica", 10)
                     c.drawString(x, y - 8, f"QR {i+1}/{len(chunks)} (small)")
+                    
+                    # Add address preview
+                    try:
+                        # Try to parse the chunk as JSON to get the address
+                        chunk_data = json.loads(smaller_chunk)
+                        if isinstance(chunk_data, list) and len(chunk_data) > 0:
+                            address = chunk_data[0].get('address', '')
+                            if address:
+                                preview = f"{address[:6]}...{address[-6:]}"
+                                c.setFont("Helvetica", 8)
+                                c.drawString(x, y - 20, preview)
+                    except:
+                        pass
+                    
                     os.remove(temp_path)
                     qr_count += 1
             print(f"[DEBUG] Saving PDF to: {pdf_path}")

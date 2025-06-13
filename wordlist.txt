@@ -285,6 +285,7 @@ casino
 castle
 casual
 cat
+catalog
 catch
 category
 cattle
@@ -307,6 +308,7 @@ chaos
 chapter
 charge
 chase
+chat
 cheap
 check
 cheese
@@ -437,6 +439,7 @@ cute
 cycle
 dad
 damage
+damp
 dance
 danger
 daring
@@ -515,8 +518,6 @@ dog
 doll
 dolphin
 domain
-domestic
-dominant
 donate
 donkey
 donor
@@ -2044,4 +2045,4 @@ youth
 zebra
 zero
 zone
-zoo 
+zoo

@@ -11,6 +11,7 @@ from bitcoinx import PrivateKey, PublicKey, BIP32PrivateKey, BIP32PublicKey, Net
 import subprocess
 import socket
 import random
+import shutil
 
 # Add lib directory to Python path
 sys.path.append(os.path.join(os.path.dirname(__file__), 'lib'))
@@ -41,10 +42,10 @@ def parse_arguments():
         epilog='''
 Examples:
   # Generate a new wallet
-  ./generate_seed.py
+  ./main.py
 
   # Decrypt an encrypted wallet file
-  ./generate_seed.py --decrypt wallet_info.txt
+  ./main.py --decrypt wallet_info.txt
 
 Security Recommendations:
   1. Run this tool on an offline system
@@ -223,139 +224,180 @@ def verify_addresses(seed: bytes, master_key: BIP32PrivateKey, addresses_file: s
     print("Verification successful: All addresses match.")
     return True
 
-if __name__ == '__main__':
-    args = parse_arguments()
-    
-    # Handle decryption if requested
-    if args.decrypt:
-        if not os.path.exists(args.decrypt):
-            print(f"✗ Error: File {args.decrypt} not found")
-            sys.exit(1)
-        password = input("Enter encryption password: ").strip()
-        xor_decrypt_file(args.decrypt, password)
-        sys.exit(0)
-    
-    # Run security checks first
-    check_security()
-    
-    print("Welcome to the Interactive Wallet Generator!\n")
-    # Use command line arguments or defaults
-    entropy_length = args.entropy
-    passphrase = args.passphrase
-    random_data_points = 1000
-    project_root = get_project_root()
-    wallet = generate_wallet(entropy_length, passphrase, random_data_points)
-    # Derive account xpub (m/44'/0'/0')
-    master_key = BIP32PrivateKey.from_seed(bytes.fromhex(wallet['seed']), Bitcoin)
-    account_key = master_key.child(44 | 0x80000000).child(0 | 0x80000000).child(0 | 0x80000000)
-    account_xpub = account_key.public_key.to_extended_key_string()
-    print("\n==============================")
-    print("      Generated Wallet")
-    print("==============================")
-    print(f"Entropy:\n{wallet['entropy']}\n")
-    print(f"Mnemonic:\n{wallet['mnemonic']}\n")
-    print(f"Seed:\n{wallet['seed']}\n")
-    print(f"Master Key (hex):\n{wallet['master_key_hex']}\n")
-    print(f"Master Key (xprv):\n{wallet['master_key_xprv']}\n")
-    print(f"Account XPUB:\n{account_xpub}\n")
-    print("------------------------------")
-    
-    # Format seed words in two columns with numbers
-    print("\n📝 Seed Phrase (Write this down carefully):")
-    print("------------------------------")
-    words = wallet['mnemonic'].split()
-    col_width = max(len(word) for word in words) + 4  # Add padding
-    for i in range(0, len(words), 2):
-        left_word = f"{i+1:2d}. {words[i]}"
-        right_word = f"{i+2:2d}. {words[i+1]}" if i+1 < len(words) else ""
-        print(f"{left_word:<{col_width}} {right_word}")
-    print("------------------------------")
-    
-    # Format private keys with numbers
-    print("\n🔑 Private Keys (Write these down carefully):")
-    print("------------------------------")
-    print("1. Master Key (xprv):")
-    print(f"   {wallet['master_key_xprv']}")
-    print("\n2. Account XPUB:")
-    print(f"   {account_xpub}")
-    print("------------------------------")
-    
-    # Ask if user wants to save seed and master keys
-    save = input("\nDo you want to save the entropy, mnemonic, seed, master keys, and xpub to a txt file? (y/n): ").strip().lower()
-    if save == 'y':
-        filename = input("Enter filename to save to (default: wallet_info.txt): ").strip() or "wallet_info.txt"
-        with open(filename, 'w') as f:
-            f.write(f"Entropy: {wallet['entropy']}\n")
-            f.write(f"Mnemonic: {wallet['mnemonic']}\n")
-            f.write(f"Seed: {wallet['seed']}\n")
-            f.write(f"Master Key (hex): {wallet['master_key_hex']}\n")
-            f.write(f"Master Key (xprv): {wallet['master_key_xprv']}\n")
-            f.write(f"Account XPUB: {account_xpub}\n")
-        print(f"Wallet info saved to {filename}")
-        encrypt = input("Do you want to encrypt the saved file? (y/n): ").strip().lower()
-        if encrypt == 'y':
-            password = input("Enter encryption password: ").strip()
-            with open(filename, 'r') as f:
-                content = f.read()
-            encrypted = ''.join(chr(ord(c) ^ ord(password[i % len(password)])) for i, c in enumerate(content))
-            with open(filename, 'w') as f:
-                f.write(encrypted)
-            print(f"File {filename} has been encrypted.")
-    else:
-        # Generate 3 random indices based on the seed
-        seed_bytes = bytes.fromhex(wallet['seed'])
-        indices = [int.from_bytes(seed_bytes[i:i+4], 'big') % 12 for i in range(0, 12, 4)][:3]
-        
-        # Get the words at those indices
-        words = wallet['mnemonic'].split()
-        verification_words = [words[i] for i in indices]
-        
-        print("\n⚠️  IMPORTANT: Please verify that you have saved your seed phrase!")
-        print("To verify, please select the correct word for each position:")
-        
-        for i, word in enumerate(verification_words):
-            # Generate 3 random options including the correct word
-            all_words = set(words)  # Get all unique words
-            options = random.sample(list(all_words - {word}), 2)  # Get 2 random different words
-            options.append(word)  # Add the correct word
-            random.shuffle(options)  # Shuffle the options
-            
-            print(f"\nPosition {indices[i] + 1}:")
-            for j, opt in enumerate(options, 1):
-                print(f"{j}. {opt}")
-            
-            while True:
-                try:
-                    choice = int(input(f"Select the correct word for position {indices[i] + 1} (1-3): "))
-                    if 1 <= choice <= 3:
-                        if options[choice-1] == word:
-                            print("✓ Correct!")
-                            break
-                        else:
-                            print("✗ Incorrect! Please try again.")
-                    else:
-                        print("Please enter a number between 1 and 3.")
-                except ValueError:
-                    print("Please enter a valid number.")
-        
-        print("\n✓ Verification complete! Please make sure you have securely saved your seed phrase.")
-        print("Remember: If you lose your seed phrase, you will lose access to your funds!")
+def secure_erase_histories():
+    """Securely erase shell and Python history files."""
+    import getpass
+    home = os.path.expanduser('~')
+    history_files = [
+        os.path.join(home, '.bash_history'),
+        os.path.join(home, '.zsh_history'),
+        os.path.join(home, '.python_history'),
+    ]
+    for hist_file in history_files:
+        try:
+            if os.path.exists(hist_file):
+                with open(hist_file, 'w') as f:
+                    f.write('')
+                os.remove(hist_file)
+                print(f"✓ Erased {hist_file}")
+        except Exception as e:
+            print(f"✗ Could not erase {hist_file}: {e}")
+    print("If you want to be absolutely sure, reboot your system to clear RAM traces.")
 
-    # Verify addresses
-    seed_bytes = bytes.fromhex(wallet['seed'])
-    master_key_obj = bip32_key_from_string(wallet['master_key_xprv'])
-    # Derive addresses from both seed and master key
-    master_from_seed = BIP32PrivateKey.from_seed(seed_bytes, Bitcoin)
-    derived_addresses_seed = derive_addresses(master_from_seed)
-    derived_addresses_master = derive_addresses(master_key_obj)
-    # Verification (less verbose)
-    all_match = all(a == b for a, b in zip(derived_addresses_seed, derived_addresses_master))
-    if all_match:
-        print("\nVerification successful: All addresses match.")
-    else:
-        print("\nVerification failed: Addresses do not match.")
-    # Write 1000 addresses to 'addresses' file
-    addresses_1000 = derive_addresses(BIP32PrivateKey.from_seed(bytes.fromhex(wallet['seed']), Bitcoin), 1000)
-    with open('addresses', 'w') as f:
-        for addr in addresses_1000:
-            f.write(addr + '\n') 
+
+def secure_exit():
+    resp = input("\nDo you want to securely erase shell and Python history before exiting? (y/N): ").strip().lower()
+    if resp == 'y':
+        secure_erase_histories()
+    # Overwrite sensitive variables (best effort)
+    globals_to_clear = ['mnemonic', 'seed', 'entropy', 'master_key', 'xprv', 'xpub', 'private_keys', 'addresses']
+    for var in globals_to_clear:
+        if var in globals():
+            globals()[var] = None
+    print("Exiting. For maximum privacy, reboot your system now.")
+    sys.exit(0)
+
+if __name__ == '__main__':
+    try:
+        args = parse_arguments()
+        
+        # Handle decryption if requested
+        if args.decrypt:
+            if not os.path.exists(args.decrypt):
+                print(f"✗ Error: File {args.decrypt} not found")
+                secure_exit()
+            password = input("Enter encryption password: ").strip()
+            xor_decrypt_file(args.decrypt, password)
+            secure_exit()
+        
+        # Run security checks first
+        check_security()
+        
+        print("Welcome to the Interactive Wallet Generator!\n")
+        # Use command line arguments or defaults
+        entropy_length = args.entropy
+        passphrase = args.passphrase
+        random_data_points = 1000
+        project_root = get_project_root()
+        wallet = generate_wallet(entropy_length, passphrase, random_data_points)
+        # Derive account xpub (m/44'/0'/0')
+        master_key = BIP32PrivateKey.from_seed(bytes.fromhex(wallet['seed']), Bitcoin)
+        account_key = master_key.child(44 | 0x80000000).child(0 | 0x80000000).child(0 | 0x80000000)
+        account_xpub = account_key.public_key.to_extended_key_string()
+        print("\n==============================")
+        print("      Generated Wallet")
+        print("==============================")
+        print(f"Entropy:\n{wallet['entropy']}\n")
+        print(f"Mnemonic:\n{wallet['mnemonic']}\n")
+        print(f"Seed:\n{wallet['seed']}\n")
+        print(f"Master Key (hex):\n{wallet['master_key_hex']}\n")
+        print(f"Master Key (xprv):\n{wallet['master_key_xprv']}\n")
+        print(f"Account XPUB:\n{account_xpub}\n")
+        print("------------------------------")
+        
+        # Format seed words in two columns with numbers
+        print("\n📝 Seed Phrase (Write this down carefully):")
+        print("------------------------------")
+        words = wallet['mnemonic'].split()
+        col_width = max(len(word) for word in words) + 4  # Add padding
+        for i in range(0, len(words), 2):
+            left_word = f"{i+1:2d}. {words[i]}"
+            right_word = f"{i+2:2d}. {words[i+1]}" if i+1 < len(words) else ""
+            print(f"{left_word:<{col_width}} {right_word}")
+        print("------------------------------")
+        
+        # Format private keys with numbers
+        print("\n🔑 Private Keys (Write these down carefully):")
+        print("------------------------------")
+        print("1. Master Key (xprv):")
+        print(f"   {wallet['master_key_xprv']}")
+        print("\n2. Account XPUB:")
+        print(f"   {account_xpub}")
+        print("------------------------------")
+        
+        # Ask if user wants to save seed and master keys
+        save = input("\nDo you want to save the entropy, mnemonic, seed, master keys, and xpub to a txt file? (y/n): ").strip().lower()
+        if save == 'y':
+            filename = input("Enter filename to save to (default: wallet_info.txt): ").strip() or "wallet_info.txt"
+            with open(filename, 'w') as f:
+                f.write(f"Entropy: {wallet['entropy']}\n")
+                f.write(f"Mnemonic: {wallet['mnemonic']}\n")
+                f.write(f"Seed: {wallet['seed']}\n")
+                f.write(f"Master Key (hex): {wallet['master_key_hex']}\n")
+                f.write(f"Master Key (xprv): {wallet['master_key_xprv']}\n")
+                f.write(f"Account XPUB: {account_xpub}\n")
+            print(f"Wallet info saved to {filename}")
+            encrypt = input("Do you want to encrypt the saved file? (y/n): ").strip().lower()
+            if encrypt == 'y':
+                password = input("Enter encryption password: ").strip()
+                with open(filename, 'r') as f:
+                    content = f.read()
+                encrypted = ''.join(chr(ord(c) ^ ord(password[i % len(password)])) for i, c in enumerate(content))
+                with open(filename, 'w') as f:
+                    f.write(encrypted)
+                print(f"File {filename} has been encrypted.")
+        else:
+            # Generate 3 random indices based on the seed
+            seed_bytes = bytes.fromhex(wallet['seed'])
+            indices = [int.from_bytes(seed_bytes[i:i+4], 'big') % 12 for i in range(0, 12, 4)][:3]
+            
+            # Get the words at those indices
+            words = wallet['mnemonic'].split()
+            verification_words = [words[i] for i in indices]
+            
+            print("\n⚠️  IMPORTANT: Please verify that you have saved your seed phrase!")
+            print("To verify, please select the correct word for each position:")
+            
+            for i, word in enumerate(verification_words):
+                # Generate 3 random options including the correct word
+                all_words = set(words)  # Get all unique words
+                options = random.sample(list(all_words - {word}), 2)  # Get 2 random different words
+                options.append(word)  # Add the correct word
+                random.shuffle(options)  # Shuffle the options
+                
+                print(f"\nPosition {indices[i] + 1}:")
+                for j, opt in enumerate(options, 1):
+                    print(f"{j}. {opt}")
+                
+                while True:
+                    try:
+                        choice = int(input(f"Select the correct word for position {indices[i] + 1} (1-3): "))
+                        if 1 <= choice <= 3:
+                            if options[choice-1] == word:
+                                print("✓ Correct!")
+                                break
+                            else:
+                                print("✗ Incorrect! Please try again.")
+                        else:
+                            print("Please enter a number between 1 and 3.")
+                    except ValueError:
+                        print("Please enter a valid number.")
+            
+            print("\n✓ Verification complete! Please make sure you have securely saved your seed phrase.")
+            print("Remember: If you lose your seed phrase, you will lose access to your funds!")
+
+        # Verify addresses
+        seed_bytes = bytes.fromhex(wallet['seed'])
+        master_key_obj = bip32_key_from_string(wallet['master_key_xprv'])
+        # Derive addresses from both seed and master key
+        master_from_seed = BIP32PrivateKey.from_seed(seed_bytes, Bitcoin)
+        derived_addresses_seed = derive_addresses(master_from_seed)
+        derived_addresses_master = derive_addresses(master_key_obj)
+        # Verification (less verbose)
+        all_match = all(a == b for a, b in zip(derived_addresses_seed, derived_addresses_master))
+        if all_match:
+            print("\nVerification successful: All addresses match.")
+        else:
+            print("\nVerification failed: Addresses do not match.")
+        # Write 1000 addresses to 'addresses' file
+        addresses_1000 = derive_addresses(BIP32PrivateKey.from_seed(bytes.fromhex(wallet['seed']), Bitcoin), 1000)
+        with open('addresses', 'w') as f:
+            for addr in addresses_1000:
+                f.write(addr + '\n')
+        secure_exit()
+    except KeyboardInterrupt:
+        print("\nInterrupted by user.")
+        secure_exit()
+    except Exception as e:
+        print(f"\nAn error occurred: {e}")
+        secure_exit() 

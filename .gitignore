@@ -1,0 +1,8 @@
+# Sensitive and generated files
+wallet_info.txt
+addresses
+*.decrypted
+*.asc
+wallet
+info.txt
+seed_and_key.txt 

@@ -473,28 +473,35 @@ def display_ascii_qr(data: str) -> None:
 def generate_qr(data: str, filename: str, paranoid: bool = False, print_only: bool = False) -> None:
     """Generate QR code from data."""
     try:
-        # Create QR code
-        qr = qrcode.QRCode(
-            version=None,  # Auto-determine version
-            error_correction=ERROR_CORRECT_L,
-            box_size=10,
-            border=4,
-        )
-        qr.add_data(data)
-        qr.make(fit=True)
+        # Split data into chunks if it's too large
+        max_chunk_size = 2000  # Maximum characters per QR code
+        chunks = [data[i:i + max_chunk_size] for i in range(0, len(data), max_chunk_size)]
         
-        # Create image
-        img = qr.make_image(fill_color="black", back_color="white")
-        
-        # Save image if not in paranoid mode
-        if not paranoid and not print_only:
-            os.makedirs(QR_DIR, exist_ok=True)
-            full_path = os.path.join(QR_DIR, filename)
-            img.save(full_path)
-            print(f"QR code saved to: {full_path}")
-        
-        # Display ASCII QR code
-        display_ascii_qr(data)
+        for i, chunk in enumerate(chunks):
+            # Create QR code
+            qr = qrcode.QRCode(
+                version=None,  # Auto-determine version
+                error_correction=ERROR_CORRECT_L,
+                box_size=10,
+                border=4,
+            )
+            qr.add_data(chunk)
+            qr.make(fit=True)
+            
+            # Create image
+            img = qr.make_image(fill_color="black", back_color="white")
+            
+            # Save image if not in paranoid mode
+            if not paranoid and not print_only:
+                os.makedirs(QR_DIR, exist_ok=True)
+                chunk_filename = f"{os.path.splitext(filename)[0]}_{i+1}.png"
+                full_path = os.path.join(QR_DIR, chunk_filename)
+                img.save(full_path)
+                print(f"QR code {i+1}/{len(chunks)} saved to: {full_path}")
+            
+            # Display ASCII QR code
+            print(f"\nQR Code {i+1}/{len(chunks)}:")
+            display_ascii_qr(chunk)
         
     except Exception as e:
         raise Exception(f"QR code generation failed: {e}")

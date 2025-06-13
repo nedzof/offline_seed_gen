@@ -202,7 +202,28 @@ if __name__ == '__main__':
     print(f"Master Key (xprv):\n{wallet['master_key_xprv']}\n")
     print(f"Account XPUB:\n{account_xpub}\n")
     print("------------------------------")
-    print("First 10 Derived Addresses:")
+    
+    # Format seed words in two columns with numbers
+    print("\n📝 Seed Phrase (Write this down carefully):")
+    print("------------------------------")
+    words = wallet['mnemonic'].split()
+    col_width = max(len(word) for word in words) + 4  # Add padding
+    for i in range(0, len(words), 2):
+        left_word = f"{i+1:2d}. {words[i]}"
+        right_word = f"{i+2:2d}. {words[i+1]}" if i+1 < len(words) else ""
+        print(f"{left_word:<{col_width}} {right_word}")
+    print("------------------------------")
+    
+    # Format private keys with numbers
+    print("\n🔑 Private Keys (Write these down carefully):")
+    print("------------------------------")
+    print("1. Master Key (xprv):")
+    print(f"   {wallet['master_key_xprv']}")
+    print("\n2. Account XPUB:")
+    print(f"   {account_xpub}")
+    print("------------------------------")
+    
+    print("\nFirst 10 Derived Addresses:")
     for i, addr in enumerate(wallet['addresses'][:10]):
         print(f"{i+1}: {addr}")
     print("------------------------------")

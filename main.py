@@ -478,67 +478,89 @@ def display_ascii_qr(data: str) -> None:
         print("Encrypted data (copy/paste into another QR tool):")
         print(data)
 
-def generate_qr(data: str, filename: str, paranoid: bool = False, print_only: bool = False) -> None:
-    """Generate QR code from data."""
+def generate_qr(data: str, filename: str, chunk_size: int = 800) -> None:
+    """Generate QR code from data and save to file."""
     try:
-        # Split data into chunks if it's too large
-        max_chunk_size = 800  # Reduced chunk size for QR code compatibility
-        chunks = [data[i:i + max_chunk_size] for i in range(0, len(data), max_chunk_size)]
+        # Split data into smaller chunks if needed
+        chunks = [data[i:i+chunk_size] for i in range(0, len(data), chunk_size)]
+        if len(chunks) > 1:
+            print(f"\nSplitting data into {len(chunks)} QR codes...")
         
-        for i, chunk in enumerate(chunks):
-            try:
-                # Create QR code
+        # Create a PDF with multiple pages if needed
+        pdf_path = f"{filename}.pdf"
+        with canvas.Canvas(pdf_path, pagesize=A4) as c:
+            for chunk_num, chunk in enumerate(chunks, 1):
+                # Generate QR code
                 qr = qrcode.QRCode(
-                    version=1,  # Start with version 1
-                    error_correction=ERROR_CORRECT_L,
-                    box_size=10,
-                    border=4,
+                    version=None,
+                    error_correction=qrcode.constants.ERROR_CORRECT_L,
+                    box_size=20,
+                    border=2
                 )
                 qr.add_data(chunk)
                 qr.make(fit=True)
                 
-                # Create image
-                img = qr.make_image(fill_color="black", back_color="white")
+                # Create QR code image
+                qr_img = qr.make_image(fill_color="black", back_color="white")
                 
-                # Save image if not in paranoid mode
-                if not paranoid and not print_only:
-                    os.makedirs(QR_DIR, exist_ok=True)
-                    chunk_filename = f"{os.path.splitext(filename)[0]}_{i+1}.png"
-                    full_path = os.path.join(QR_DIR, chunk_filename)
-                    img.save(full_path)
-                    print(f"QR code {i+1}/{len(chunks)} saved to: {full_path}")
+                # Convert to PIL Image
+                pil_img = qr_img.get_image()
                 
-                # Display ASCII QR code
-                print(f"\nQR Code {i+1}/{len(chunks)}:")
-                display_ascii_qr(chunk)
+                # Save QR code image
+                img_path = f"{filename}_chunk{chunk_num}.png"
+                pil_img.save(img_path)
                 
-            except Exception as e:
-                print(f"Warning: Failed to generate QR code {i+1}: {e}")
-                print("Trying with smaller chunk size...")
-                # Try with a smaller chunk if this one fails
-                smaller_chunk = chunk[:400]  # Try with half the size
-                qr = qrcode.QRCode(
-                    version=1,
-                    error_correction=ERROR_CORRECT_L,
-                    box_size=10,
-                    border=4,
-                )
-                qr.add_data(smaller_chunk)
-                qr.make(fit=True)
+                # Calculate positions for 3x4 grid
+                qr_size = 44 * mm  # 44mm QR code size
+                margin = 10 * mm
+                spacing_x = (A4[0] - (2 * margin) - (3 * qr_size)) / 2  # Space between QR codes horizontally
+                spacing_y = (A4[1] - (2 * margin) - (4 * qr_size)) / 3  # Space between QR codes vertically
                 
-                img = qr.make_image(fill_color="black", back_color="white")
+                # Calculate positions for all 12 QR codes
+                positions = []
+                for row in range(4):
+                    for col in range(3):
+                        x = margin + col * (qr_size + spacing_x)
+                        y = A4[1] - margin - (row + 1) * qr_size - row * spacing_y
+                        positions.append((x, y))
                 
-                if not paranoid and not print_only:
-                    chunk_filename = f"{os.path.splitext(filename)[0]}_{i+1}_small.png"
-                    full_path = os.path.join(QR_DIR, chunk_filename)
-                    img.save(full_path)
-                    print(f"QR code {i+1}/{len(chunks)} (smaller) saved to: {full_path}")
+                # Draw QR code at the calculated position
+                c.drawImage(img_path, positions[chunk_num-1][0], positions[chunk_num-1][1], 
+                          width=qr_size, height=qr_size)
                 
-                print(f"\nQR Code {i+1}/{len(chunks)} (smaller):")
-                display_ascii_qr(smaller_chunk)
+                # Add address labels
+                addresses = json.loads(chunk)
+                first_five = addresses[:5]
+                last_five = addresses[-5:]
+                
+                # Draw first 5 addresses
+                y_pos = positions[chunk_num-1][1] - 5 * mm
+                c.setFont("Helvetica", 6)
+                c.drawString(positions[chunk_num-1][0], y_pos, "First 5 addresses:")
+                for i, addr in enumerate(first_five):
+                    y_pos -= 3 * mm
+                    c.drawString(positions[chunk_num-1][0], y_pos, f"{i+1}. {addr}")
+                
+                # Draw last 5 addresses
+                y_pos -= 3 * mm
+                c.drawString(positions[chunk_num-1][0], y_pos, "Last 5 addresses:")
+                for i, addr in enumerate(last_five):
+                    y_pos -= 3 * mm
+                    c.drawString(positions[chunk_num-1][0], y_pos, f"{i+1}. {addr}")
+                
+                # If we've filled a page, start a new one
+                if chunk_num % 12 == 0 and chunk_num < len(chunks):
+                    c.showPage()
+                
+                # Clean up temporary image file
+                os.remove(img_path)
+                
+                print(f"Generated QR code {chunk_num}/{len(chunks)}")
+        
+        print(f"\nQR codes saved to {pdf_path}")
         
     except Exception as e:
-        raise Exception(f"QR code generation failed: {e}")
+        raise Exception(f"Failed to generate QR code: {str(e)}")
 
 def generate_encrypted_qr(data: str, password: str, filename: str) -> None:
     """Generate an encrypted QR code for secure air-gapped transfer."""
@@ -632,24 +654,8 @@ def generate_qr_pdf(data: str, filename: str, paranoid: bool = False, print_only
                     temp_path = os.path.join(QR_DIR, f"temp_qr_{i}.png")
                     img.save(temp_path)
                     c.drawImage(temp_path, x, y, width=qr_size, height=qr_size)
-                    
-                    # Add QR number
-                    c.setFont("Helvetica", 10)
+                    c.setFont("Helvetica", 10)  # Keep the same font size
                     c.drawString(x, y - 8, f"QR {i+1}/{len(chunks)}")
-                    
-                    # Add address preview
-                    try:
-                        # Try to parse the chunk as JSON to get the address
-                        chunk_data = json.loads(chunk)
-                        if isinstance(chunk_data, list) and len(chunk_data) > 0:
-                            address = chunk_data[0].get('address', '')
-                            if address:
-                                preview = f"{address[:6]}...{address[-6:]}"
-                                c.setFont("Helvetica", 8)
-                                c.drawString(x, y - 20, preview)
-                    except:
-                        pass
-                    
                     os.remove(temp_path)
                     qr_count += 1
                 except Exception as e:
@@ -676,24 +682,8 @@ def generate_qr_pdf(data: str, filename: str, paranoid: bool = False, print_only
                     temp_path = os.path.join(QR_DIR, f"temp_qr_{i}_small.png")
                     img.save(temp_path)
                     c.drawImage(temp_path, x, y, width=qr_size, height=qr_size)
-                    
-                    # Add QR number
-                    c.setFont("Helvetica", 10)
+                    c.setFont("Helvetica", 10)  # Keep the same font size
                     c.drawString(x, y - 8, f"QR {i+1}/{len(chunks)} (small)")
-                    
-                    # Add address preview
-                    try:
-                        # Try to parse the chunk as JSON to get the address
-                        chunk_data = json.loads(smaller_chunk)
-                        if isinstance(chunk_data, list) and len(chunk_data) > 0:
-                            address = chunk_data[0].get('address', '')
-                            if address:
-                                preview = f"{address[:6]}...{address[-6:]}"
-                                c.setFont("Helvetica", 8)
-                                c.drawString(x, y - 20, preview)
-                    except:
-                        pass
-                    
                     os.remove(temp_path)
                     qr_count += 1
             print(f"[DEBUG] Saving PDF to: {pdf_path}")

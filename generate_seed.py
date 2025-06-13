@@ -132,17 +132,23 @@ if __name__ == '__main__':
     random_data_points = 1000
     project_root = get_project_root()
     wallet = generate_wallet(entropy_length, passphrase, random_data_points)
+    # Derive account xpub (m/44'/0'/0')
+    master_key = BIP32PrivateKey.from_seed(bytes.fromhex(wallet['seed']), Bitcoin)
+    account_key = master_key.child(44 | 0x80000000).child(0 | 0x80000000).child(0 | 0x80000000)
+    account_xpub = account_key.public_key.to_extended_key_string()
     print("\nGenerated Wallet:")
     print(f"Entropy: {wallet['entropy']}")
     print(f"Mnemonic: {wallet['mnemonic']}")
     print(f"Seed: {wallet['seed']}")
     print(f"Master Key (hex): {wallet['master_key_hex']}")
     print(f"Master Key (xprv): {wallet['master_key_xprv']}")
-    print("\nDerived Addresses:")
-    for i, addr in enumerate(wallet['addresses']):
-        print(f"Address {i+1}: {addr}")
+    print(f"Account XPUB: {account_xpub}")
+    print("\nFirst 10 Derived Addresses:")
+    for i, addr in enumerate(wallet['addresses'][:10]):
+        print(f"{i+1}: {addr}")
+
     # Ask if user wants to save seed and master keys
-    save = input("\nDo you want to save the entropy, mnemonic, seed, and master keys to a txt file? (y/n): ").strip().lower()
+    save = input("\nDo you want to save the entropy, mnemonic, seed, master keys, and xpub to a txt file? (y/n): ").strip().lower()
     if save == 'y':
         filename = input("Enter filename to save to (default: wallet_info.txt): ").strip() or "wallet_info.txt"
         with open(filename, 'w') as f:
@@ -151,6 +157,7 @@ if __name__ == '__main__':
             f.write(f"Seed: {wallet['seed']}\n")
             f.write(f"Master Key (hex): {wallet['master_key_hex']}\n")
             f.write(f"Master Key (xprv): {wallet['master_key_xprv']}\n")
+            f.write(f"Account XPUB: {account_xpub}\n")
         print(f"Wallet info saved to {filename}")
         encrypt = input("Do you want to encrypt the saved file? (y/n): ").strip().lower()
         if encrypt == 'y':
@@ -168,16 +175,12 @@ if __name__ == '__main__':
     master_from_seed = BIP32PrivateKey.from_seed(seed_bytes, Bitcoin)
     derived_addresses_seed = derive_addresses(master_from_seed)
     derived_addresses_master = derive_addresses(master_key_obj)
-    print("\nVerification of first 10 addresses:")
-    all_match = True
-    for i, (addr_seed, addr_master) in enumerate(zip(derived_addresses_seed, derived_addresses_master)):
-        print(f"Address {i+1}: {addr_seed}")
-        if addr_seed != addr_master:
-            all_match = False
+    # Verification (less verbose)
+    all_match = all(a == b for a, b in zip(derived_addresses_seed, derived_addresses_master))
     if all_match:
-        print("Verification successful: All addresses match.")
+        print("\nVerification successful: All addresses match.")
     else:
-        print("Verification failed: Addresses do not match.")
+        print("\nVerification failed: Addresses do not match.")
     # Write 1000 addresses to 'addresses' file
     addresses_1000 = derive_addresses(BIP32PrivateKey.from_seed(bytes.fromhex(wallet['seed']), Bitcoin), 1000)
     with open('addresses', 'w') as f:

@@ -523,7 +523,9 @@ def generate_p2pkh_addresses(mnemonic: str, passphrase: str, derivation_path: st
         # Derive the path
         for part in path_parts[1:]:  # Skip 'm'
             if part.endswith("'"):
-                current_key = current_key.child(int(part[:-1]), is_hardened=True)
+                # For hardened keys, add 0x80000000 to the index
+                index = int(part[:-1]) + 0x80000000
+                current_key = current_key.child(index)
             else:
                 current_key = current_key.child(int(part))
         

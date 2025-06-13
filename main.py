@@ -474,34 +474,60 @@ def generate_qr(data: str, filename: str, paranoid: bool = False, print_only: bo
     """Generate QR code from data."""
     try:
         # Split data into chunks if it's too large
-        max_chunk_size = 2000  # Maximum characters per QR code
+        max_chunk_size = 800  # Reduced chunk size for QR code compatibility
         chunks = [data[i:i + max_chunk_size] for i in range(0, len(data), max_chunk_size)]
         
         for i, chunk in enumerate(chunks):
-            # Create QR code
-            qr = qrcode.QRCode(
-                version=None,  # Auto-determine version
-                error_correction=ERROR_CORRECT_L,
-                box_size=10,
-                border=4,
-            )
-            qr.add_data(chunk)
-            qr.make(fit=True)
-            
-            # Create image
-            img = qr.make_image(fill_color="black", back_color="white")
-            
-            # Save image if not in paranoid mode
-            if not paranoid and not print_only:
-                os.makedirs(QR_DIR, exist_ok=True)
-                chunk_filename = f"{os.path.splitext(filename)[0]}_{i+1}.png"
-                full_path = os.path.join(QR_DIR, chunk_filename)
-                img.save(full_path)
-                print(f"QR code {i+1}/{len(chunks)} saved to: {full_path}")
-            
-            # Display ASCII QR code
-            print(f"\nQR Code {i+1}/{len(chunks)}:")
-            display_ascii_qr(chunk)
+            try:
+                # Create QR code
+                qr = qrcode.QRCode(
+                    version=1,  # Start with version 1
+                    error_correction=ERROR_CORRECT_L,
+                    box_size=10,
+                    border=4,
+                )
+                qr.add_data(chunk)
+                qr.make(fit=True)
+                
+                # Create image
+                img = qr.make_image(fill_color="black", back_color="white")
+                
+                # Save image if not in paranoid mode
+                if not paranoid and not print_only:
+                    os.makedirs(QR_DIR, exist_ok=True)
+                    chunk_filename = f"{os.path.splitext(filename)[0]}_{i+1}.png"
+                    full_path = os.path.join(QR_DIR, chunk_filename)
+                    img.save(full_path)
+                    print(f"QR code {i+1}/{len(chunks)} saved to: {full_path}")
+                
+                # Display ASCII QR code
+                print(f"\nQR Code {i+1}/{len(chunks)}:")
+                display_ascii_qr(chunk)
+                
+            except Exception as e:
+                print(f"Warning: Failed to generate QR code {i+1}: {e}")
+                print("Trying with smaller chunk size...")
+                # Try with a smaller chunk if this one fails
+                smaller_chunk = chunk[:400]  # Try with half the size
+                qr = qrcode.QRCode(
+                    version=1,
+                    error_correction=ERROR_CORRECT_L,
+                    box_size=10,
+                    border=4,
+                )
+                qr.add_data(smaller_chunk)
+                qr.make(fit=True)
+                
+                img = qr.make_image(fill_color="black", back_color="white")
+                
+                if not paranoid and not print_only:
+                    chunk_filename = f"{os.path.splitext(filename)[0]}_{i+1}_small.png"
+                    full_path = os.path.join(QR_DIR, chunk_filename)
+                    img.save(full_path)
+                    print(f"QR code {i+1}/{len(chunks)} (smaller) saved to: {full_path}")
+                
+                print(f"\nQR Code {i+1}/{len(chunks)} (smaller):")
+                display_ascii_qr(smaller_chunk)
         
     except Exception as e:
         raise Exception(f"QR code generation failed: {e}")

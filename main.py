@@ -221,23 +221,18 @@ def run_self_test() -> bool:
         strong_password = "Str0ngP@ssw0rd!2024"
         
         for pwd in weak_passwords:
-            try:
-                if check_password_strength(pwd):
-                    print(f"✗ Password strength check failed: accepted weak password '{pwd}'")
-                    tests_passed = False
-                    break
-            except Exception as e:
-                print(f"(Expected) Weak password '{pwd}' rejected: {e}")
-        
-        try:
-            if not check_password_strength(strong_password):
-                print("✗ Password strength check failed: rejected strong password")
+            is_valid, _ = check_password_strength(pwd)
+            if is_valid:
+                print(f"✗ Password strength check failed: accepted weak password '{pwd}'")
                 tests_passed = False
-            else:
-                print("✓ Password strength check successful")
-        except Exception as e:
-            print(f"✗ Password strength check failed: {e}")
+                break
+        
+        is_valid, _ = check_password_strength(strong_password)
+        if not is_valid:
+            print("✗ Password strength check failed: rejected strong password")
             tests_passed = False
+        else:
+            print("✓ Password strength check successful")
     except Exception as e:
         print(f"✗ Password strength check failed: {e}")
         tests_passed = False
@@ -251,49 +246,12 @@ def run_self_test() -> bool:
     
     return tests_passed
 
-def parse_arguments():
+def parse_arguments() -> argparse.Namespace:
     """Parse command line arguments."""
-    parser = argparse.ArgumentParser(
-        description='Bitcoin SV HD Wallet Generator',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog='''
-Examples:
-  # Generate a new wallet
-  ./main.py
-
-  # Decrypt an encrypted wallet file
-  ./main.py --decrypt wallet_info.txt
-
-  # Run in paranoid mode (ASCII QR only)
-  ./main.py --paranoid
-
-  # Run in print-only mode
-  ./main.py --print-only
-
-Security Recommendations:
-  1. Run this tool on an offline system
-  2. Use Xorg instead of Wayland
-  3. Copy the tool to internal storage before running
-  4. Double-check network connectivity is disabled
-  5. Store backups securely and never share your seed phrase
-'''
-    )
-    
-    parser.add_argument('--decrypt', metavar='FILE',
-                      help='Decrypt an encrypted wallet file')
-    parser.add_argument('--entropy', type=int, default=32,
-                      help='Entropy length in bytes (default: 32)')
-    parser.add_argument('--passphrase', default='',
-                      help='Optional passphrase for the wallet')
-    parser.add_argument('--derivation_path', default='',
-                      help='Optional derivation path for the wallet')
-    parser.add_argument('--paranoid', action='store_true',
-                      help='Run in paranoid mode (ASCII QR only)')
-    parser.add_argument('--print-only', action='store_true',
-                      help='Run in print-only mode')
-    parser.add_argument('--selftest', action='store_true',
-                      help='Run self-test and exit')
-    
+    parser = argparse.ArgumentParser(description='Generate and encrypt wallet data')
+    parser.add_argument('--paranoid', action='store_true', help='Paranoid mode: ASCII QR only')
+    parser.add_argument('--print-only', action='store_true', help='Print-only mode: No file output')
+    parser.add_argument('--selftest', action='store_true', help='Run self-test mode')
     return parser.parse_args()
 
 def check_security() -> None:
@@ -459,17 +417,20 @@ def secure_exit():
     print("3. Consider using a hardware wallet for large amounts")
     sys.exit(0)
     
-def check_password_strength(password: str) -> bool:
-    """Check if the password meets security requirements."""
+def check_password_strength(password: str) -> Tuple[bool, str]:
+    """Check password strength and return (is_valid, error_message)."""
     if len(password) < 12:
-        return False
+        return False, "Password must be at least 12 characters long"
+    
     has_upper = bool(re.search(r'[A-Z]', password))
     has_lower = bool(re.search(r'[a-z]', password))
     has_digit = bool(re.search(r'\d', password))
     has_special = bool(re.search(r'[!@#$%^&*(),.?":{}|<>]', password))
+    
     if not (has_upper and has_lower and has_digit and has_special):
-        return False
-    return True
+        return False, "Password must contain uppercase, lowercase, numbers, and special characters"
+    
+    return True, ""
 
 def secure_delete(filename: str) -> None:
     """Securely delete a file using shred if available, otherwise overwrite."""
@@ -537,7 +498,9 @@ def generate_qr(data: str, filename: str, paranoid: bool = False, print_only: bo
         # Save image if not in paranoid mode
         if not paranoid and not print_only:
             os.makedirs(QR_DIR, exist_ok=True)
-            img.save(os.path.join(QR_DIR, filename))
+            full_path = os.path.join(QR_DIR, filename)
+            img.save(full_path)
+            print(f"QR code saved to: {full_path}")
         
         # Display ASCII QR code
         display_ascii_qr(data)
@@ -556,15 +519,29 @@ def generate_encrypted_qr(data: str, password: str, filename: str) -> None:
 def main():
     """Main function."""
     try:
+        # Parse command line arguments
+        args = parse_arguments()
+        
+        # Run self-test if requested
+        if args.selftest:
+            ok = run_self_test()
+            sys.exit(0 if ok else 1)
+        
+        # Verify wordlist integrity
+        if not verify_wordlist_integrity():
+            print("Error: Wordlist integrity check failed!")
+            sys.exit(1)
+        
         # Run security checks
         check_security()
         
         # Get password for encryption
         while True:
             password = getpass.getpass("Enter password to encrypt wallet data: ")
-            if check_password_strength(password):
+            is_valid, error_msg = check_password_strength(password)
+            if is_valid:
                 break
-            print("Password does not meet security requirements. Please try again.")
+            print(f"Password error: {error_msg}")
         
         # Generate wallet
         wallet_info = generate_wallet()
@@ -577,11 +554,11 @@ def main():
             password
         )
         
-        # Save encrypted data
-        with open("wallet_info.txt", "w") as f:
-            f.write(encrypted_data)
-        
-        print("\nEncrypted wallet data saved to wallet_info.txt")
+        # Save encrypted data if not in print-only mode
+        if not args.print_only:
+            with open("wallet_info.txt", "w") as f:
+                f.write(encrypted_data)
+            print("\nEncrypted wallet data saved to wallet_info.txt")
         
         # Ask if user wants QR code
         if input("\nDo you want to generate a QR code with all wallet information? (y/n): ").lower() == 'y':
@@ -592,7 +569,7 @@ def main():
                 'derivation_path': wallet_info['derivation_path'],
                 'version': wallet_info['version']
             })
-            generate_qr(qr_data, "wallet_info.png", paranoid=True)
+            generate_qr(qr_data, "wallet_info.png", args.paranoid, args.print_only)
         
         print("\nIMPORTANT: Keep your seed phrase and derivation path safe!")
         print("1. Write down the seed phrase and keep it in a secure location")
@@ -608,9 +585,12 @@ def main():
         # Secure exit
         secure_exit()
         
+    except KeyboardInterrupt:
+        print("\nOperation cancelled by user.")
+        sys.exit(1)
     except Exception as e:
         print(f"Error: {e}")
         sys.exit(1)
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main() 

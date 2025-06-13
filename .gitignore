@@ -5,4 +5,5 @@ addresses
 *.asc
 wallet
 info.txt
-seed_and_key.txt 
+seed_and_key.txt
+offline_seed_gen.zip 

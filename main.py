@@ -12,6 +12,10 @@ import subprocess
 import socket
 import random
 import shutil
+import base64
+from Cryptodome.Cipher import AES
+from Cryptodome.Protocol.KDF import PBKDF2
+from Cryptodome.Random import get_random_bytes
 
 # Add lib directory to Python path
 sys.path.append(os.path.join(os.path.dirname(__file__), 'lib'))
@@ -20,18 +24,63 @@ sys.path.append(os.path.join(os.path.dirname(__file__), 'lib'))
 from matplotlib_minimal import figure, subplot, tight_layout, savefig, close
 from numpy_minimal import array, random_bytes, frombuffer, histogram
 
-def xor_decrypt_file(filename: str, password: str) -> None:
-    """Decrypt an XOR-encrypted file using the provided password."""
+def derive_key(password: str, salt: bytes) -> bytes:
+    """Derive a key from the password using PBKDF2."""
+    # Use SHA256 for key derivation
+    key = hashlib.pbkdf2_hmac(
+        'sha256',
+        password.encode(),
+        salt,
+        100000,
+        dklen=32
+    )
+    return key
+
+def encrypt_wallet_data(data: str, password: str) -> str:
+    """Encrypt wallet data using AES-256-GCM."""
+    # Generate a random salt and nonce
+    salt = get_random_bytes(16)
+    nonce = get_random_bytes(12)
+    
+    # Derive key from password
+    key = derive_key(password, salt)
+    
+    # Create AES-GCM cipher
+    cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)
+    
+    # Encrypt the data
+    ciphertext, tag = cipher.encrypt_and_digest(data.encode())
+    
+    # Combine salt, nonce, tag, and ciphertext
+    encrypted_data = salt + nonce + tag + ciphertext
+    
+    # Return base64 encoded result
+    return base64.b64encode(encrypted_data).decode()
+
+def decrypt_wallet_data(encrypted_data: str, password: str) -> str:
+    """Decrypt wallet data using AES-256-GCM."""
     try:
-        with open(filename, 'r') as f:
-            encrypted = f.read()
-        decrypted = ''.join(chr(ord(c) ^ ord(password[i % len(password)])) for i, c in enumerate(encrypted))
-        output_file = filename + '.decrypted'
-        with open(output_file, 'w') as f:
-            f.write(decrypted)
-        print(f"✓ Decrypted file saved as {output_file}")
+        # Decode base64 data
+        data = base64.b64decode(encrypted_data)
+        
+        # Extract salt, nonce, tag, and ciphertext
+        salt = data[:16]
+        nonce = data[16:28]
+        tag = data[28:44]
+        ciphertext = data[44:]
+        
+        # Derive key from password
+        key = derive_key(password, salt)
+        
+        # Create AES-GCM cipher
+        cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)
+        
+        # Decrypt the data
+        plaintext = cipher.decrypt_and_verify(ciphertext, tag)
+        
+        return plaintext.decode()
     except Exception as e:
-        print(f"✗ Error decrypting file: {e}")
+        print(f"Error decrypting data: {e}")
         sys.exit(1)
 
 def parse_arguments():
@@ -155,19 +204,33 @@ def seed_to_master_key(seed: bytes) -> BIP32PrivateKey:
     """Convert seed to master key using BIP32."""
     return BIP32PrivateKey.from_seed(seed, Bitcoin)
 
-def derive_addresses(master_key: BIP32PrivateKey, count: int = 10) -> List[str]:
-    """Derive addresses using ElectrumSV's derivation path."""
-    # ElectrumSV uses m/44'/0'/0' for the first account
-    account_key = master_key.child(44 | 0x80000000).child(0 | 0x80000000).child(0 | 0x80000000)
+def derive_addresses(master_key: BIP32PrivateKey, derivation_path: str, count: int = 10) -> List[str]:
+    """Derive addresses using the specified derivation path."""
+    # Parse the derivation path
+    path_parts = derivation_path.split('/')
+    if len(path_parts) < 4:
+        raise ValueError("Invalid derivation path format")
+    
+    # Derive the account key
+    account_key = master_key
+    for part in path_parts[1:]:  # Skip 'm'
+        if part.endswith("'"):
+            hardened = True
+            index = int(part[:-1]) | 0x80000000
+        else:
+            hardened = False
+            index = int(part)
+        account_key = account_key.child(index)
+    
     addresses = []
     for i in range(count):
-        # Derive external chain addresses (m/44'/0'/0'/0/i)
+        # Derive external chain addresses
         address_key = account_key.child(0).child(i)
         addresses.append(address_key.public_key.to_address().to_string())
     return addresses
 
-def generate_wallet(entropy_length: int = 16, passphrase: str = "", num_points: int = 100) -> Dict:
-    """Generate a new wallet with the specified entropy length and passphrase."""
+def generate_wallet(entropy_length: int = 16, passphrase: str = "", derivation_path: str = "m/44'/236'/0'", num_points: int = 100) -> Dict:
+    """Generate a new wallet with the specified entropy length, passphrase, and derivation path."""
     # Generate entropy
     entropy = generate_entropy(entropy_length)
     entropy_hex = entropy.hex()
@@ -182,10 +245,7 @@ def generate_wallet(entropy_length: int = 16, passphrase: str = "", num_points: 
     master_key = seed_to_master_key(seed)
     
     # Derive addresses
-    addresses = derive_addresses(master_key)
-    
-    # Generate visualization
-    # plot_wallet_generation(entropy_hex, mnemonic, seed.hex(), master_key.to_hex(), num_points)
+    addresses = derive_addresses(master_key, derivation_path)
     
     return {
         'entropy': entropy_hex,
@@ -193,36 +253,12 @@ def generate_wallet(entropy_length: int = 16, passphrase: str = "", num_points: 
         'seed': seed.hex(),
         'master_key_hex': master_key.to_hex(),
         'master_key_xprv': master_key.to_extended_key_string(),
-        'addresses': addresses
+        'addresses': addresses,
+        'derivation_path': derivation_path
     }
 
 def get_project_root() -> str:
     return os.path.dirname(os.path.abspath(__file__))
-
-def verify_addresses(seed: bytes, master_key: BIP32PrivateKey, addresses_file: str) -> bool:
-    """Verify the seed and master key by deriving addresses using ElectrumSV's derivation path."""
-    with open(addresses_file, 'r') as f:
-        addresses = [line.strip() for line in f.readlines() if line.strip()]
-    if len(addresses) != 1000:
-        print(f"Warning: addresses.txt contains {len(addresses)} addresses, expected 1000.")
-        return False
-    
-    # Derive addresses from seed and master key using ElectrumSV's derivation path
-    master_from_seed = BIP32PrivateKey.from_seed(seed, Bitcoin)
-    derived_addresses_seed = derive_addresses(master_from_seed)
-    derived_addresses_master = derive_addresses(master_key)
-    
-    # Compare first 10 addresses
-    for i, (derived_seed, derived_master) in enumerate(zip(derived_addresses_seed, derived_addresses_master)):
-        print(f"Address {i+1}:")
-        print(f"Derived from Seed: {derived_seed}")
-        print(f"Derived from Master Key: {derived_master}")
-        if derived_seed != derived_master:
-            print("Verification failed: Addresses do not match.")
-            return False
-    
-    print("Verification successful: All addresses match.")
-    return True
 
 def secure_erase_histories():
     """Securely erase shell and Python history files."""
@@ -244,7 +280,6 @@ def secure_erase_histories():
             print(f"✗ Could not erase {hist_file}: {e}")
     print("If you want to be absolutely sure, reboot your system to clear RAM traces.")
 
-
 def secure_exit():
     resp = input("\nDo you want to securely erase shell and Python history before exiting? (y/N): ").strip().lower()
     if resp == 'y':
@@ -257,147 +292,75 @@ def secure_exit():
     print("Exiting. For maximum privacy, reboot your system now.")
     sys.exit(0)
 
-if __name__ == '__main__':
-    try:
-        args = parse_arguments()
-        
-        # Handle decryption if requested
-        if args.decrypt:
-            if not os.path.exists(args.decrypt):
-                print(f"✗ Error: File {args.decrypt} not found")
-                secure_exit()
-            password = input("Enter encryption password: ").strip()
-            xor_decrypt_file(args.decrypt, password)
-            secure_exit()
-        
-        # Run security checks first
-        check_security()
-        
-        print("Welcome to the Interactive Wallet Generator!\n")
-        # Use command line arguments or defaults
-        entropy_length = args.entropy
-        passphrase = args.passphrase
-        random_data_points = 1000
-        project_root = get_project_root()
-        wallet = generate_wallet(entropy_length, passphrase, random_data_points)
-        # Derive account xpub (m/44'/0'/0')
-        master_key = BIP32PrivateKey.from_seed(bytes.fromhex(wallet['seed']), Bitcoin)
-        account_key = master_key.child(44 | 0x80000000).child(0 | 0x80000000).child(0 | 0x80000000)
-        account_xpub = account_key.public_key.to_extended_key_string()
-        print("\n==============================")
-        print("      Generated Wallet")
-        print("==============================")
-        print(f"Entropy:\n{wallet['entropy']}\n")
-        print(f"Mnemonic:\n{wallet['mnemonic']}\n")
-        print(f"Seed:\n{wallet['seed']}\n")
-        print(f"Master Key (hex):\n{wallet['master_key_hex']}\n")
-        print(f"Master Key (xprv):\n{wallet['master_key_xprv']}\n")
-        print(f"Account XPUB:\n{account_xpub}\n")
-        print("------------------------------")
-        
-        # Format seed words in two columns with numbers
-        print("\n📝 Seed Phrase (Write this down carefully):")
-        print("------------------------------")
-        words = wallet['mnemonic'].split()
-        col_width = max(len(word) for word in words) + 4  # Add padding
-        for i in range(0, len(words), 2):
-            left_word = f"{i+1:2d}. {words[i]}"
-            right_word = f"{i+2:2d}. {words[i+1]}" if i+1 < len(words) else ""
-            print(f"{left_word:<{col_width}} {right_word}")
-        print("------------------------------")
-        
-        # Format private keys with numbers
-        print("\n🔑 Private Keys (Write these down carefully):")
-        print("------------------------------")
-        print("1. Master Key (xprv):")
-        print(f"   {wallet['master_key_xprv']}")
-        print("\n2. Account XPUB:")
-        print(f"   {account_xpub}")
-        print("------------------------------")
-        
-        # Ask if user wants to save seed and master keys
-        save = input("\nDo you want to save the entropy, mnemonic, seed, master keys, and xpub to a txt file? (y/n): ").strip().lower()
-        if save == 'y':
-            filename = input("Enter filename to save to (default: wallet_info.txt): ").strip() or "wallet_info.txt"
-            with open(filename, 'w') as f:
-                f.write(f"Entropy: {wallet['entropy']}\n")
-                f.write(f"Mnemonic: {wallet['mnemonic']}\n")
-                f.write(f"Seed: {wallet['seed']}\n")
-                f.write(f"Master Key (hex): {wallet['master_key_hex']}\n")
-                f.write(f"Master Key (xprv): {wallet['master_key_xprv']}\n")
-                f.write(f"Account XPUB: {account_xpub}\n")
-            print(f"Wallet info saved to {filename}")
-            encrypt = input("Do you want to encrypt the saved file? (y/n): ").strip().lower()
-            if encrypt == 'y':
-                password = input("Enter encryption password: ").strip()
-                with open(filename, 'r') as f:
-                    content = f.read()
-                encrypted = ''.join(chr(ord(c) ^ ord(password[i % len(password)])) for i, c in enumerate(content))
-                with open(filename, 'w') as f:
-                    f.write(encrypted)
-                print(f"File {filename} has been encrypted.")
-        else:
-            # Generate 3 random indices based on the seed
-            seed_bytes = bytes.fromhex(wallet['seed'])
-            indices = [int.from_bytes(seed_bytes[i:i+4], 'big') % 12 for i in range(0, 12, 4)][:3]
-            
-            # Get the words at those indices
-            words = wallet['mnemonic'].split()
-            verification_words = [words[i] for i in indices]
-            
-            print("\n⚠️  IMPORTANT: Please verify that you have saved your seed phrase!")
-            print("To verify, please select the correct word for each position:")
-            
-            for i, word in enumerate(verification_words):
-                # Generate 3 random options including the correct word
-                all_words = set(words)  # Get all unique words
-                options = random.sample(list(all_words - {word}), 2)  # Get 2 random different words
-                options.append(word)  # Add the correct word
-                random.shuffle(options)  # Shuffle the options
-                
-                print(f"\nPosition {indices[i] + 1}:")
-                for j, opt in enumerate(options, 1):
-                    print(f"{j}. {opt}")
-                
-                while True:
-                    try:
-                        choice = int(input(f"Select the correct word for position {indices[i] + 1} (1-3): "))
-                        if 1 <= choice <= 3:
-                            if options[choice-1] == word:
-                                print("✓ Correct!")
-                                break
-                            else:
-                                print("✗ Incorrect! Please try again.")
-                        else:
-                            print("Please enter a number between 1 and 3.")
-                    except ValueError:
-                        print("Please enter a valid number.")
-            
-            print("\n✓ Verification complete! Please make sure you have securely saved your seed phrase.")
-            print("Remember: If you lose your seed phrase, you will lose access to your funds!")
+def main():
+    args = parse_arguments()
+    
+    if args.decrypt:
+        password = input("Enter password: ").strip()
+        try:
+            with open(args.decrypt, 'r') as f:
+                encrypted_data = f.read()
+            decrypted_data = decrypt_wallet_data(encrypted_data, password)
+            print("\nDecrypted wallet information:")
+            print(decrypted_data)
+        except Exception as e:
+            print(f"Error decrypting file: {e}")
+            sys.exit(1)
+        return
+    
+    check_security()
+    
+    # Get derivation path
+    print("\nSelect derivation path:")
+    print("1. Standard (BIP44, Recommended for most wallets): m/44'/236'/0'")
+    print("2. Legacy (ElectrumSV): m/44'/0'/0'")
+    choice = input("Enter choice (1/2) [1]: ").strip() or "1"
+    derivation_path = "m/44'/236'/0'" if choice == "1" else "m/44'/0'/0'"
+    
+    # Get passphrase
+    passphrase = args.passphrase or input("Enter optional passphrase (press Enter for none): ").strip()
+    
+    # Generate wallet
+    wallet = generate_wallet(
+        entropy_length=args.entropy,
+        passphrase=passphrase,
+        derivation_path=derivation_path
+    )
+    
+    # Display wallet information
+    print("\n=== Wallet Information ===")
+    print(f"Entropy: {wallet['entropy']}")
+    print(f"Mnemonic: {wallet['mnemonic']}")
+    print(f"Derivation Path: {wallet['derivation_path']}")
+    if passphrase:
+        print(f"Passphrase: {passphrase}")
+    print("\nFirst 5 addresses:")
+    for i, addr in enumerate(wallet['addresses'][:5]):
+        print(f"{i+1}. {addr}")
+    
+    # Save wallet information
+    wallet_info = f"""Entropy: {wallet['entropy']}
+Mnemonic: {wallet['mnemonic']}
+Derivation Path: {wallet['derivation_path']}
+Passphrase: {passphrase if passphrase else '(none)'}
+Master Key (xprv): {wallet['master_key_xprv']}
+"""
+    
+    # Encrypt and save wallet information
+    password = input("\nEnter password to encrypt wallet information: ").strip()
+    encrypted_data = encrypt_wallet_data(wallet_info, password)
+    
+    with open('wallet_info.txt', 'w') as f:
+        f.write(encrypted_data)
+    
+    print("\n✓ Wallet information has been encrypted and saved to wallet_info.txt")
+    print("\nIMPORTANT: Please write down and keep safe:")
+    print("1. The mnemonic seed phrase (12/24 words)")
+    print("2. The derivation path (m/44'/236'/0' or m/44'/0'/0')")
+    print("3. The passphrase (if used)")
+    print("\nKeep these in a secure location. Anyone with access to these can access your funds.")
+    
+    secure_exit()
 
-        # Verify addresses
-        seed_bytes = bytes.fromhex(wallet['seed'])
-        master_key_obj = bip32_key_from_string(wallet['master_key_xprv'])
-        # Derive addresses from both seed and master key
-        master_from_seed = BIP32PrivateKey.from_seed(seed_bytes, Bitcoin)
-        derived_addresses_seed = derive_addresses(master_from_seed)
-        derived_addresses_master = derive_addresses(master_key_obj)
-        # Verification (less verbose)
-        all_match = all(a == b for a, b in zip(derived_addresses_seed, derived_addresses_master))
-        if all_match:
-            print("\nVerification successful: All addresses match.")
-        else:
-            print("\nVerification failed: Addresses do not match.")
-        # Write 1000 addresses to 'addresses' file
-        addresses_1000 = derive_addresses(BIP32PrivateKey.from_seed(bytes.fromhex(wallet['seed']), Bitcoin), 1000)
-        with open('addresses', 'w') as f:
-            for addr in addresses_1000:
-                f.write(addr + '\n')
-        secure_exit()
-    except KeyboardInterrupt:
-        print("\nInterrupted by user.")
-        secure_exit()
-    except Exception as e:
-        print(f"\nAn error occurred: {e}")
-        secure_exit() 
+if __name__ == '__main__':
+    main() 

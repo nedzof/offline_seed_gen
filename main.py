@@ -252,7 +252,6 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument('--paranoid', action='store_true', help='Paranoid mode: ASCII QR only')
     parser.add_argument('--print-only', action='store_true', help='Print-only mode: No file output')
     parser.add_argument('--selftest', action='store_true', help='Run self-test mode')
-    parser.add_argument('--addresses', type=int, default=0, help='Generate QR code with specified number of addresses (default: 0)')
     return parser.parse_args()
 
 def check_security() -> None:
@@ -517,43 +516,40 @@ def generate_encrypted_qr(data: str, password: str, filename: str) -> None:
     except Exception as e:
         print(f"Warning: Could not generate encrypted QR data: {e}")
 
-def generate_multiple_addresses(mnemonic: str, passphrase: str, derivation_path: str, count: int = 1000) -> List[Dict[str, str]]:
-    """Generate multiple addresses from the same seed."""
+def generate_p2pkh_addresses(mnemonic: str, passphrase: str, derivation_path: str, count: int = 1000) -> List[str]:
+    """Generate P2PKH addresses from the seed."""
     try:
         # Convert mnemonic to seed
         seed = mnemonic_to_seed(mnemonic, passphrase)
         
         # Create master key
-        master_key = BIP32PrivateKey.from_seed(seed, network=Bitcoin)
+        master_key = BIP32PrivateKey.from_seed(seed, Network.MAINNET)
         
         # Parse derivation path
         path_parts = derivation_path.split('/')
-        if path_parts[0] != 'm':
-            raise ValueError("Invalid derivation path: must start with 'm'")
+        current_key = master_key
         
-        # Get the base path without the last index
-        base_path = '/'.join(path_parts[:-1])
-        base_key = master_key.derive_path(base_path)
+        # Derive the path
+        for part in path_parts[1:]:  # Skip 'm'
+            if part.endswith("'"):
+                current_key = current_key.child_key(int(part[:-1]), is_hardened=True)
+            else:
+                current_key = current_key.child_key(int(part))
         
         # Generate addresses
         addresses = []
         for i in range(count):
-            # Derive child key
-            child_key = base_key.derive(i)
+            # Derive child key for each address
+            child_key = current_key.child_key(i)
+            # Get public key
             public_key = child_key.public_key
-            
-            # Get address
+            # Generate P2PKH address
             address = public_key.to_address()
-            
-            addresses.append({
-                'index': i,
-                'address': str(address),
-                'derivation_path': f"{base_path}/{i}"
-            })
+            addresses.append(str(address))
         
         return addresses
     except Exception as e:
-        raise Exception(f"Failed to generate addresses: {e}")
+        raise Exception(f"Failed to generate P2PKH addresses: {e}")
 
 def main():
     """Main function."""
@@ -599,27 +595,7 @@ def main():
                 f.write(encrypted_data)
             print("\nEncrypted wallet data saved to wallet_info.txt")
         
-        # Generate addresses QR code if requested
-        if args.addresses > 0:
-            print(f"\nGenerating QR code with {args.addresses} addresses...")
-            addresses = generate_multiple_addresses(
-                wallet_info['mnemonic'],
-                wallet_info['passphrase'],
-                wallet_info['derivation_path'],
-                args.addresses
-            )
-            
-            # Create QR data with addresses
-            qr_data = json.dumps({
-                'version': wallet_info['version'],
-                'addresses': addresses
-            }, indent=2)
-            
-            # Generate QR code
-            generate_qr(qr_data, "addresses.png", args.paranoid, args.print_only)
-            print(f"Generated QR code with {len(addresses)} addresses")
-        
-        # Ask if user wants QR code for wallet info
+        # Ask if user wants QR code
         if input("\nDo you want to generate a QR code with all wallet information? (y/n): ").lower() == 'y':
             print("\nGenerating QR code for air-gapped transfer...")
             qr_data = json.dumps({
@@ -629,6 +605,31 @@ def main():
                 'version': wallet_info['version']
             })
             generate_qr(qr_data, "wallet_info.png", args.paranoid, args.print_only)
+        
+        # Ask if user wants P2PKH addresses QR code
+        if input("\nDo you want to generate an unencrypted QR code with 1000 P2PKH addresses? (y/n): ").lower() == 'y':
+            print("\nGenerating P2PKH addresses...")
+            addresses = generate_p2pkh_addresses(
+                wallet_info['mnemonic'],
+                wallet_info['passphrase'],
+                wallet_info['derivation_path']
+            )
+            
+            # Create QR code with addresses
+            addresses_data = json.dumps({
+                'addresses': addresses,
+                'derivation_path': wallet_info['derivation_path'],
+                'count': len(addresses)
+            })
+            
+            if not args.print_only:
+                os.makedirs(QR_DIR, exist_ok=True)
+                with open(os.path.join(QR_DIR, "p2pkh_addresses.json"), "w") as f:
+                    f.write(addresses_data)
+                print(f"\nP2PKH addresses saved to {QR_DIR}/p2pkh_addresses.json")
+            
+            print("\nGenerating QR code for P2PKH addresses...")
+            generate_qr(addresses_data, "p2pkh_addresses.png", args.paranoid, args.print_only)
         
         print("\nIMPORTANT: Keep your seed phrase and derivation path safe!")
         print("1. Write down the seed phrase and keep it in a secure location")

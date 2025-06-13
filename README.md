@@ -1,19 +1,48 @@
-# Bitcoin SV HD Wallet Generator
+# ElectrumSV Seed Tool
 
-A portable, offline Bitcoin SV (BSV) hierarchical deterministic (HD) wallet generator compatible with ElectrumSV and BIP39/BIP32 standards.
+A secure, offline tool for generating and managing Bitcoin SV (BSV) wallet seeds with advanced security features.
 
 ## Features
 
-- Generates BIP39 mnemonic phrases and BIP32 HD wallets
-- Compatible with ElectrumSV
-- Runs completely offline
-- Portable - includes Python 3.10 binary and dependencies
-- No internet connection required
-- No virtual environment needed
-- Simple XOR encryption for wallet backups
-- Security checks for safe operation
-- Seed phrase verification
-- Formatted output for easy manual recording
+- 🔒 **Offline Operation**: Designed to run completely offline for maximum security
+- 🎲 **Cryptographically Secure**: Uses system entropy and secure random number generation
+- 🔐 **Strong Encryption**: AES-256-GCM encryption for wallet data
+- 📱 **QR Code Support**: Generate QR codes for easy air-gapped transfer
+- 🧪 **Self-Test Mode**: Comprehensive test suite to verify functionality
+- 🔍 **Security Checks**: Runtime security verification
+- 🛡️ **Memory Protection**: Secure memory handling and cleanup
+- 📝 **Detailed Logging**: Comprehensive operation logging
+
+## Security Features
+
+- **Entropy Generation**: Uses system entropy sources for true randomness
+- **Memory Protection**: 
+  - Memory locking to prevent swapping
+  - Secure memory wiping
+  - Protected memory regions
+- **Secure Deletion**: 
+  - Secure file deletion
+  - Shell history cleanup
+  - Python history cleanup
+- **Password Protection**:
+  - Strong password requirements
+  - Rate-limited decryption attempts
+  - Secure password handling
+- **Paranoid Mode**: Optional ASCII-only QR code generation
+- **Print-Only Mode**: Optional mode to prevent file writing
+
+## Installation
+
+1. Clone the repository:
+```bash
+git clone https://github.com/nedzof/offline_seed_gen.git
+cd offline_seed_gen
+```
+
+2. Install dependencies locally:
+```bash
+./install_deps.sh
+```
 
 ## Usage
 
@@ -26,87 +55,119 @@ A portable, offline Bitcoin SV (BSV) hierarchical deterministic (HD) wallet gene
 This will:
 1. Perform security checks
 2. Generate a new wallet
-3. Display the seed phrase and private keys in a formatted two-column layout
-4. Offer options to save the wallet info (with optional encryption)
+3. Encrypt the wallet data
+4. Save the encrypted data
+5. Optionally generate QR codes
 
 ### Command Line Options
 
-```bash
-./main.py --help
-```
-
-Available options:
-- `--decrypt FILE`: Decrypt an encrypted wallet file
-- `--entropy BYTES`: Set entropy length in bytes (default: 32)
-- `--passphrase TEXT`: Set an optional passphrase for the wallet
-
-Examples:
-```bash
-# Generate a new wallet
-./main.py
-
-# Generate with custom entropy
-./main.py --entropy 64
-
-# Generate with a passphrase
-./main.py --passphrase "my secret passphrase"
-
-# Decrypt an encrypted wallet file
-./main.py --decrypt wallet_info.txt
-```
+- `--paranoid`: Run in paranoid mode (ASCII QR only)
+- `--print-only`: Run in print-only mode (no file output)
+- `--selftest`: Run self-test and exit
 
 ### Security Recommendations
 
-1. Run this tool on an offline system
-2. Use Xorg instead of Wayland
-3. Copy the tool to internal storage before running
-4. Double-check network connectivity is disabled
-5. Store backups securely and never share your seed phrase
+1. **Run Offline**: Always run this tool on an offline system
+2. **Use Xorg**: Prefer Xorg over Wayland for better security
+3. **Internal Storage**: Copy the tool to internal storage before running
+4. **Network Check**: Double-check network connectivity is disabled
+5. **Secure Storage**: Store backups securely and never share your seed phrase
+6. **Password Management**: Use a strong, unique password for encryption
+7. **Secure Environment**: Run in a clean, secure environment
+8. **Regular Updates**: Keep the tool updated with the latest security patches
 
-## Tails OS Compatibility
+## Password Requirements
 
-This tool is designed to work with Tails OS. When using with Tails:
+The tool enforces strong password requirements:
+- Minimum 12 characters
+- Must contain uppercase letters
+- Must contain lowercase letters
+- Must contain numbers
+- Must contain special characters
 
-1. Copy the tool to your persistent storage
-2. Run the tool from internal storage (not from USB)
-3. Save wallet information to your persistent storage
-4. Use the optional encryption when saving sensitive data
+## QR Code Generation
+
+The tool can generate QR codes in two modes:
+1. **Standard Mode**: Generates both image and ASCII QR codes
+2. **Paranoid Mode**: Generates ASCII QR codes only
+
+## Self-Test Mode
+
+Run comprehensive tests with:
+```bash
+./main.py --selftest
+```
+
+Tests include:
+- Entropy generation
+- Mnemonic generation
+- Encryption/Decryption
+- QR code generation
+- Password strength validation
 
 ## File Structure
 
-```
-.
-├── bin/
-│   └── python3.10
-├── lib/
-│   ├── bitcoinx_minimal.py
-│   ├── matplotlib_minimal.py
-│   └── numpy_minimal.py
-├── main.py
-└── README.md
-```
+- `main.py`: Main script
+- `install_deps.sh`: Dependency installation script
+- `lib/`: Local dependencies
+- `qr_bundle/`: Generated QR codes
+- `wallet_info.txt`: Encrypted wallet data
 
-## Security Features
+## Dependencies
 
-- Entropy visualization
-- Security checks for:
-  - USB drive execution
-  - Display server type
-  - Network connectivity
-- Optional XOR encryption for saved files
-- Seed phrase verification
-- Formatted output for accurate manual recording
+Local dependencies are managed in the `lib` directory:
+- `pycryptodomex`: Cryptographic operations
+- `qrcode`: QR code generation
+- `bitcoinx`: Bitcoin SV operations
 
-## Requirements
+## Security Considerations
 
-- 64-bit Linux system
-- Xorg display server (not Wayland)
-- No internet connection required
-- No additional dependencies needed
+### Memory Safety
+- Memory is locked to prevent swapping
+- Sensitive data is securely wiped
+- Protected memory regions are used
+
+### File Safety
+- Secure file deletion
+- History cleanup
+- Temporary file handling
+
+### Network Safety
+- Offline operation
+- Network connectivity checks
+- Air-gapped transfer support
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request
 
 ## License
 
-MIT License
+This project is licensed under the MIT License - see the LICENSE file for details.
 
-## Author
-- [nedzof](https://github.com/nedzof) 
+## Disclaimer
+
+This tool is provided for educational and research purposes only. Use at your own risk. The authors are not responsible for any loss of funds or other damages that may result from the use of this tool.
+
+## Acknowledgments
+
+- ElectrumSV team for inspiration
+- Bitcoin SV community for support
+- All contributors and testers
+
+## Support
+
+For issues and feature requests, please use the GitHub issue tracker.
+
+## Version History
+
+- 1.0: Initial release
+  - Basic wallet generation
+  - Encryption support
+  - QR code generation
+  - Security features
+  - Self-test mode 

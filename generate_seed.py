@@ -7,6 +7,8 @@ import secrets
 from typing import List, Tuple, Optional, Dict
 import hmac
 from bitcoinx import PrivateKey, PublicKey, BIP32PrivateKey, BIP32PublicKey, Network, Bitcoin, bip32_key_from_string
+import subprocess
+import socket
 
 # Add lib directory to Python path
 sys.path.append(os.path.join(os.path.dirname(__file__), 'lib'))
@@ -14,6 +16,56 @@ sys.path.append(os.path.join(os.path.dirname(__file__), 'lib'))
 # Import from local lib directory
 from matplotlib_minimal import figure, subplot, tight_layout, savefig, close
 from numpy_minimal import array, random_bytes, frombuffer, histogram
+
+def check_security():
+    """Perform security checks before running the wallet generator."""
+    print("Performing security checks...")
+    
+    # Check if running from USB
+    current_path = os.path.abspath(__file__)
+    if '/media/' in current_path or '/mnt/' in current_path:
+        print("\n⚠️  WARNING: Script is running from a USB drive!")
+        print("For maximum security, please copy the script to internal storage first.")
+        print("This prevents potential hardware-level attacks and ensures the OS handles file access properly.")
+        response = input("Do you want to continue anyway? (y/n): ").strip().lower()
+        if response != 'y':
+            sys.exit(1)
+    
+    # Check display server
+    try:
+        display_server = os.environ.get('XDG_SESSION_TYPE', '').lower()
+        if display_server == 'wayland':
+            print("\n⚠️  WARNING: Running under Wayland!")
+            print("For maximum security, it's recommended to use Xorg instead.")
+            print("Wayland's security model might allow screen capture without user consent.")
+            response = input("Do you want to continue anyway? (y/n): ").strip().lower()
+            if response != 'y':
+                sys.exit(1)
+    except Exception as e:
+        print(f"Could not determine display server: {e}")
+    
+    # Check network connectivity
+    try:
+        # Try to create a socket connection
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(1)
+        s.connect(('8.8.8.8', 53))
+        s.close()
+        print("\n⚠️  WARNING: Network connection detected!")
+        print("For maximum security, please disconnect from all networks before generating a wallet.")
+        print("The network icon should show that you are offline.")
+        response = input("Do you want to continue anyway? (y/n): ").strip().lower()
+        if response != 'y':
+            sys.exit(1)
+    except socket.error:
+        print("✓ Network check passed: No active network connection detected.")
+    
+    print("\n✓ Security checks completed.")
+    print("Remember to:")
+    print("1. Keep your system offline during wallet generation")
+    print("2. Use a secure, private environment")
+    print("3. Store your backup securely")
+    print("4. Never share your seed phrase or private keys\n")
 
 def generate_entropy(length: int = 32) -> bytes:
     """Generate cryptographically secure random data."""
@@ -125,6 +177,9 @@ def verify_addresses(seed: bytes, master_key: BIP32PrivateKey, addresses_file: s
     return True
 
 if __name__ == '__main__':
+    # Run security checks first
+    check_security()
+    
     print("Welcome to the Interactive Wallet Generator!\n")
     # Use default values
     entropy_length = 32

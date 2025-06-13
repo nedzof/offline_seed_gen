@@ -223,11 +223,6 @@ if __name__ == '__main__':
     print(f"   {account_xpub}")
     print("------------------------------")
     
-    print("\nFirst 10 Derived Addresses:")
-    for i, addr in enumerate(wallet['addresses'][:10]):
-        print(f"{i+1}: {addr}")
-    print("------------------------------")
-
     # Ask if user wants to save seed and master keys
     save = input("\nDo you want to save the entropy, mnemonic, seed, master keys, and xpub to a txt file? (y/n): ").strip().lower()
     if save == 'y':

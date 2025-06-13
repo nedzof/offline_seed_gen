@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 
-import os
 import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'lib'))
 import time
 import json
 import base64
@@ -19,6 +20,7 @@ import tempfile
 from typing import Tuple, Optional, List, Dict
 from pathlib import Path
 import traceback
+from tqdm import tqdm
 
 # Add lib directory to Python path
 lib_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'lib')
@@ -57,6 +59,28 @@ try:
     libc.mlockall(MCL_CURRENT | MCL_FUTURE)
 except:
     pass  # Not critical if it fails
+
+# Add color and bold formatting for terminal output
+BOLD = '\033[1m'
+CYAN = '\033[36m'
+GREEN = '\033[32m'
+YELLOW = '\033[33m'
+RED = '\033[31m'
+RESET = '\033[0m'
+
+# Helper functions for colored output
+
+def bold_cyan(text):
+    return f"{BOLD}{CYAN}{text}{RESET}"
+
+def green(text):
+    return f"{GREEN}{text}{RESET}"
+
+def yellow(text):
+    return f"{YELLOW}{text}{RESET}"
+
+def red(text):
+    return f"{RED}{text}{RESET}"
 
 def derive_key(password: str, salt: bytes) -> bytes:
     """Derive a key from the password using PBKDF2."""
@@ -265,38 +289,38 @@ def parse_arguments() -> argparse.Namespace:
 
 def check_security() -> None:
     """Run security checks before proceeding"""
-    print("\nRunning security checks...")
+    print(bold_cyan("\nRunning security checks..."))
     
     # Check for network connectivity
     try:
         import socket
         socket.create_connection(("8.8.8.8", 53), timeout=1)
-        print("⚠️  Warning: Network connection detected. For maximum security, run this script on an air-gapped system.")
+        print(yellow("⚠️  Warning: Network connection detected. For maximum security, run this script on an air-gapped system."))
     except:
-        print("✓ No network connection detected")
+        print(green("✓ No network connection detected"))
     
     # Check for memory locking
     try:
         if ctypes.CDLL('libc.so.6').mlockall(2) == 0:
-            print("✓ Memory locking enabled")
+            print(green("✓ Memory locking enabled"))
         else:
-            print("⚠️  Warning: Could not lock memory")
+            print(yellow("⚠️  Warning: Could not lock memory"))
     except:
-        print("⚠️  Warning: Could not enable memory locking")
+        print(yellow("⚠️  Warning: Could not enable memory locking"))
     
     # Check for secure environment
     if os.environ.get('DISPLAY'):
-        print("⚠️  Warning: Running in GUI environment. Consider using a terminal-only session.")
+        print(yellow("⚠️  Warning: Running in GUI environment. Consider using a terminal-only session."))
     else:
-        print("✓ Running in terminal environment")
+        print(green("✓ Running in terminal environment"))
     
     # Check for root privileges
     if os.geteuid() == 0:
-        print("⚠️  Warning: Running as root. Consider running as a normal user.")
+        print(yellow("⚠️  Warning: Running as root. Consider running as a normal user."))
     else:
-        print("✓ Running as normal user")
+        print(green("✓ Running as normal user"))
     
-    print("\nSecurity checks completed.")
+    print(bold_cyan("\nSecurity checks completed."))
 
 def generate_entropy(length: int = 32) -> bytes:
     """Generate cryptographically secure random data."""
@@ -408,7 +432,7 @@ def secure_erase_histories():
 
 def secure_exit():
     """Securely exit the program, clearing sensitive data."""
-    resp = input("\nDo you want to securely erase shell and Python history before exiting? (y/N): ").strip().lower()
+    resp = input(bold_cyan("\nDo you want to securely erase shell and Python history before exiting? (y/N): ")).strip().lower()
     if resp == 'y':
         secure_erase_histories()
     
@@ -420,7 +444,7 @@ def secure_exit():
     for file in temp_files:
         secure_delete(file)
     
-    print("\nExiting securely. Remember to:")
+    print(bold_cyan("\nExiting securely. Remember to:"))
     print("1. Keep your seed phrase and derivation path safe")
     print("2. Never share your private keys")
     print("3. Consider using a hardware wallet for large amounts")
@@ -598,14 +622,11 @@ def generate_p2pkh_addresses(mnemonic: str, passphrase: str, derivation_path: st
         
         # Generate addresses
         addresses = []
-        for i in range(count):
-            # Derive child key for each address
+        for i in tqdm(range(count), desc="Generating P2PKH addresses", unit="addr"):
             child_key = current_key.child(i)
-            # Get public key
             public_key = child_key.public_key
-            # Generate P2PKH address
-            address = public_key.to_address()
-            addresses.append(str(address))
+            p2pkh_address = public_key.to_address()
+            addresses.append(str(p2pkh_address))
         
         return addresses
     except Exception as e:
@@ -614,10 +635,10 @@ def generate_p2pkh_addresses(mnemonic: str, passphrase: str, derivation_path: st
 def generate_qr_pdf(data: str, filename: str, paranoid: bool = False, print_only: bool = False) -> None:
     """Generate QR codes and save them to a PDF."""
     try:
-        print(f"[DEBUG] Attempting to generate PDF: {filename}")
+        # print(f"[DEBUG] Attempting to generate PDF: {filename}")
         max_chunk_size = 800  # Reduced chunk size for QR code compatibility
         chunks = [data[i:i + max_chunk_size] for i in range(0, len(data), max_chunk_size)]
-        print(f"[DEBUG] Number of QR chunks: {len(chunks)}")
+        # print(f"[DEBUG] Number of QR chunks: {len(chunks)}")
         if not paranoid and not print_only:
             os.makedirs(QR_DIR, exist_ok=True)
             pdf_path = os.path.join(QR_DIR, f"{os.path.splitext(filename)[0]}.pdf")
@@ -690,12 +711,12 @@ def generate_qr_pdf(data: str, filename: str, paranoid: bool = False, print_only
                     c.drawString(x, y - 8, f"QR {i+1}/{len(chunks)} (small)")
                     os.remove(temp_path)
                     qr_count += 1
-            print(f"[DEBUG] Saving PDF to: {pdf_path}")
+            # print(f"[DEBUG] Saving PDF to: {pdf_path}")
             c.save()
-            print(f"[DEBUG] PDF saved to: {pdf_path}")
+            # print(f"[DEBUG] PDF saved to: {pdf_path}")
         else:
             print("[DEBUG] Paranoid or print_only mode, not saving PDF.")
-        print(f"[DEBUG] Exiting generate_qr_pdf for {filename}")
+        # print(f"[DEBUG] Exiting generate_qr_pdf for {filename}")
     except Exception as e:
         print(f"[ERROR] PDF generation failed: {e}")
         traceback.print_exc()
@@ -704,7 +725,7 @@ def generate_qr_pdf(data: str, filename: str, paranoid: bool = False, print_only
             pdf_path = os.path.join(QR_DIR, f"{os.path.splitext(filename)[0]}_blank.pdf")
             c = canvas.Canvas(pdf_path, pagesize=A4)
             c.save()
-            print(f"[DEBUG] Blank PDF saved to: {pdf_path}")
+            # print(f"[DEBUG] Blank PDF saved to: {pdf_path}")
         except Exception as e2:
             print(f"[ERROR] Failed to save blank PDF: {e2}")
             traceback.print_exc()
@@ -744,7 +765,7 @@ def main():
         
         # Get password for encryption
         while True:
-            password = getpass.getpass("Enter password to encrypt wallet data: ")
+            password = getpass.getpass(bold_cyan("Enter password to encrypt wallet data: "))
             is_valid, error_msg = check_password_strength(password)
             if is_valid:
                 break
@@ -765,24 +786,24 @@ def main():
         if not args.print_only:
             with open("wallet_info.txt", "w") as f:
                 f.write(encrypted_data)
-            print("\nEncrypted wallet data saved to wallet_info.txt")
+            print(green("\nEncrypted wallet data saved to wallet_info.txt"))
         
         # Ask if user wants QR code
-        if input("\nDo you want to generate a QR code with all wallet information? (y/n): ").lower() == 'y':
-            print("\nGenerating QR code for air-gapped transfer...")
+        if input(bold_cyan("\nDo you want to generate a QR code with all wallet information? (y/n): ")).lower() == 'y':
+            print(bold_cyan("\nGenerating QR code for air-gapped transfer..."))
             qr_data = json.dumps({
                 'mnemonic': wallet_info['mnemonic'],
                 'passphrase': wallet_info['passphrase'],
                 'derivation_path': wallet_info['derivation_path'],
                 'version': wallet_info['version']
             })
-            print(f"[DEBUG] Calling generate_qr_pdf for {qr_data[:40]}... (truncated)")
+            # print(f"[DEBUG] Calling generate_qr_pdf for {qr_data[:40]}... (truncated)")
             generate_qr_pdf(qr_data, "wallet_info.pdf", args.paranoid, args.print_only)
-            print(f"[DEBUG] Finished generate_qr_pdf for wallet_info.pdf")
+            # print(f"[DEBUG] Finished generate_qr_pdf for wallet_info.pdf")
         
         # Ask if user wants P2PKH addresses QR code
-        if input("\nDo you want to generate an unencrypted QR code with 1000 P2PKH addresses? (y/n): ").lower() == 'y':
-            print("\nGenerating P2PKH addresses...")
+        if input(bold_cyan("\nDo you want to generate an unencrypted QR code with 1000 P2PKH addresses? (y/n): ")).lower() == 'y':
+            print(bold_cyan("\nGenerating P2PKH addresses..."))
             addresses = generate_p2pkh_addresses(
                 wallet_info['mnemonic'],
                 wallet_info['passphrase'],
@@ -802,10 +823,10 @@ def main():
                     f.write(addresses_data)
                 print(f"\nP2PKH addresses saved to {QR_DIR}/p2pkh_addresses.json")
             
-            print("\nGenerating QR code for P2PKH addresses...")
+            print("Generating QR codes for addresses...")
             generate_qr_pdf(addresses_data, "p2pkh_addresses.pdf", args.paranoid, args.print_only)
         
-        print("\nIMPORTANT: Keep your seed phrase and derivation path safe!")
+        print(bold_cyan("\nIMPORTANT: Keep your seed phrase and derivation path safe!"))
         print("1. Write down the seed phrase and keep it in a secure location")
         print("2. Remember your passphrase")
         print("3. Note the derivation path")
@@ -813,17 +834,17 @@ def main():
         print("5. Consider using a hardware wallet for large amounts")
         
         # Ask about secure history erasure
-        if input("\nDo you want to securely erase shell and Python history? (y/n): ").lower() == 'y':
+        if input(bold_cyan("\nDo you want to securely erase shell and Python history? (y/n): ")).lower() == 'y':
             secure_erase_histories()
         
         # Secure exit
         secure_exit()
         
     except KeyboardInterrupt:
-        print("\nOperation cancelled by user.")
+        print(yellow("\nOperation cancelled by user."))
         sys.exit(1)
     except Exception as e:
-        print(f"Error: {e}")
+        print(red(f"Error: {e}"))
         sys.exit(1)
 
 if __name__ == "__main__":

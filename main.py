@@ -6,6 +6,7 @@ import hashlib
 import secrets
 from typing import List, Tuple, Optional, Dict
 import hmac
+import argparse
 from bitcoinx import PrivateKey, PublicKey, BIP32PrivateKey, BIP32PublicKey, Network, Bitcoin, bip32_key_from_string
 import subprocess
 import socket
@@ -17,6 +18,51 @@ sys.path.append(os.path.join(os.path.dirname(__file__), 'lib'))
 # Import from local lib directory
 from matplotlib_minimal import figure, subplot, tight_layout, savefig, close
 from numpy_minimal import array, random_bytes, frombuffer, histogram
+
+def xor_decrypt_file(filename: str, password: str) -> None:
+    """Decrypt an XOR-encrypted file using the provided password."""
+    try:
+        with open(filename, 'r') as f:
+            encrypted = f.read()
+        decrypted = ''.join(chr(ord(c) ^ ord(password[i % len(password)])) for i, c in enumerate(encrypted))
+        output_file = filename + '.decrypted'
+        with open(output_file, 'w') as f:
+            f.write(decrypted)
+        print(f"✓ Decrypted file saved as {output_file}")
+    except Exception as e:
+        print(f"✗ Error decrypting file: {e}")
+        sys.exit(1)
+
+def parse_arguments():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(
+        description='Bitcoin SV HD Wallet Generator',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog='''
+Examples:
+  # Generate a new wallet
+  ./generate_seed.py
+
+  # Decrypt an encrypted wallet file
+  ./generate_seed.py --decrypt wallet_info.txt
+
+Security Recommendations:
+  1. Run this tool on an offline system
+  2. Use Xorg instead of Wayland
+  3. Copy the tool to internal storage before running
+  4. Double-check network connectivity is disabled
+  5. Store backups securely and never share your seed phrase
+'''
+    )
+    
+    parser.add_argument('--decrypt', metavar='FILE',
+                      help='Decrypt an encrypted wallet file')
+    parser.add_argument('--entropy', type=int, default=32,
+                      help='Entropy length in bytes (default: 32)')
+    parser.add_argument('--passphrase', default='',
+                      help='Optional passphrase for the wallet')
+    
+    return parser.parse_args()
 
 def check_security():
     """Perform security checks before running the wallet generator."""
@@ -178,13 +224,24 @@ def verify_addresses(seed: bytes, master_key: BIP32PrivateKey, addresses_file: s
     return True
 
 if __name__ == '__main__':
+    args = parse_arguments()
+    
+    # Handle decryption if requested
+    if args.decrypt:
+        if not os.path.exists(args.decrypt):
+            print(f"✗ Error: File {args.decrypt} not found")
+            sys.exit(1)
+        password = input("Enter encryption password: ").strip()
+        xor_decrypt_file(args.decrypt, password)
+        sys.exit(0)
+    
     # Run security checks first
     check_security()
     
     print("Welcome to the Interactive Wallet Generator!\n")
-    # Use default values
-    entropy_length = 32
-    passphrase = ""
+    # Use command line arguments or defaults
+    entropy_length = args.entropy
+    passphrase = args.passphrase
     random_data_points = 1000
     project_root = get_project_root()
     wallet = generate_wallet(entropy_length, passphrase, random_data_points)

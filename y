@@ -1,5 +1,0 @@
-Entropy: c812235af78e6945f75fd3b187d29079e6e410708281033e04694044e1f135a7
-Mnemonic: sight muffin strategy upset trade perfect talk whisper random discover picnic view hover amused season expect add utility bottom level evolve weather stove twice
-Seed: f602e6f97530a3608b94d260cb3ac25f4ebe146e2ef46b51c0c572f92018d3170ac135a389435ea1321d92337d7ca22fa9a5cfec5f736ef087881e9ab93894dc
-Master Key (hex): 969f14cf05277c11e3c90e38920f12c57b9671190e1f6f652d4523637ef3b037
-Master Key (xprv): xprv9s21ZrQH143K3qb7NHaoc4DHAKYALVKviVDxG9KPLHfiXFTYicqxfh4QLC83WQPrLJKGft8YqLSFo4kr7BGEEpq7myjVfJ7d9aV1AvvVocX

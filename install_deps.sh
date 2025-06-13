@@ -3,7 +3,10 @@
 # Exit on error
 set -e
 
-echo "Starting dependency installation..."
+PYTHON=bin/python3.10
+PIP="$PYTHON -m pip"
+
+echo "Starting dependency installation using $PYTHON..."
 
 # Create lib directory if it doesn't exist
 mkdir -p lib
@@ -14,14 +17,15 @@ command_exists() {
 }
 
 # Check for required tools
-if ! command_exists pip; then
-    echo "Error: pip is not installed. Please install pip first."
+if [ ! -f "$PYTHON" ]; then
+    echo "Error: $PYTHON not found. Please ensure your custom Python is installed."
     exit 1
 fi
 
 # Install dependencies locally with specific versions
 echo "Installing dependencies..."
-pip install --target=lib \
+$PIP install --upgrade pip
+$PIP install --target=lib \
     pycryptodomex==3.19.0 \
     qrcode==7.4.2 \
     reportlab==4.0.8 \
@@ -36,9 +40,9 @@ pip install --target=lib \
 
 # Verify critical dependencies
 echo "Verifying installations..."
-python3 -c "
+$PYTHON -c '
 import sys
-sys.path.insert(0, 'lib')
+sys.path.insert(0, "lib")
 try:
     from Cryptodome.Cipher import AES
     from Cryptodome.Protocol.KDF import scrypt
@@ -46,11 +50,12 @@ try:
     from reportlab.pdfgen import canvas
     from bitcoinx import BIP32PrivateKey, Bitcoin
     from electrumsv_secp256k1 import create_context
-    print('All critical dependencies verified successfully.')
+    from PIL import Image
+    print("All critical dependencies verified successfully.")
 except ImportError as e:
-    print(f'Error: Failed to import {str(e)}')
+    print(f"Error: Failed to import {str(e)}")
     sys.exit(1)
-"
+'
 
 echo "Dependencies installed and verified successfully in lib directory"
-echo "You can now run the script offline using: python3 main.py" 
+echo "You can now run the script offline using: $PYTHON main.py" 

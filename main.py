@@ -523,7 +523,7 @@ def generate_p2pkh_addresses(mnemonic: str, passphrase: str, derivation_path: st
         seed = mnemonic_to_seed(mnemonic, passphrase)
         
         # Create master key
-        master_key = BIP32PrivateKey.from_seed(seed, Network.MAINNET)
+        master_key = BIP32PrivateKey.from_seed(seed, Bitcoin)
         
         # Parse derivation path
         path_parts = derivation_path.split('/')

@@ -1,0 +1,25 @@
+Metadata-Version: 2.1
+Name: bitcoinX
+Version: 0.9
+Summary: Library of Bitcoin functions
+Home-page: https://github.com/kyuupichan/bitcoinX
+Author: Neil Booth
+Author-email: kyuupichan@gmail.com
+License: MIT Licence
+Download-URL: https://github.com/kyuupichan/bitcoinX/archive/0.9.tar.gz
+Platform: UNKNOWN
+Classifier: Development Status :: 2 - Pre-Alpha
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: Python :: 3.8
+Classifier: Topic :: Internet
+Classifier: Topic :: Software Development :: Libraries :: Python Modules
+Requires-Python: >=3.8
+License-File: LICENCE
+Requires-Dist: attrs
+Requires-Dist: pycryptodomex
+Requires-Dist: electrumsv-secp256k1
+
+Library of Bitcoin functions covering network protocol, consensus, transactions, scripting and signing.
+

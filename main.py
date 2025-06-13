@@ -188,7 +188,7 @@ def run_self_test() -> bool:
         test_mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
         test_passphrase = "testpassphrase"
         test_derivation_path = "m/44'/236'/0'"
-        test_password = "Str0ngP@ssw0rd!2024"
+        test_password = "thisisalongpassword123456789"
         encrypted = encrypt_wallet_data(test_mnemonic, test_passphrase, test_derivation_path, test_password)
         decrypted = decrypt_with_rate_limit(encrypted, test_password, 1)
         if (
@@ -218,7 +218,7 @@ def run_self_test() -> bool:
     print("\nTest 5: Password Strength")
     try:
         weak_passwords = ["short", "password123", "qwerty", "12345678"]
-        strong_password = "Str0ngP@ssw0rd!2024"
+        strong_password = "thisisalongpassword123456789"
         
         for pwd in weak_passwords:
             is_valid, _ = check_password_strength(pwd)
@@ -419,17 +419,8 @@ def secure_exit():
     
 def check_password_strength(password: str) -> Tuple[bool, str]:
     """Check password strength and return (is_valid, error_message)."""
-    if len(password) < 12:
-        return False, "Password must be at least 12 characters long"
-    
-    has_upper = bool(re.search(r'[A-Z]', password))
-    has_lower = bool(re.search(r'[a-z]', password))
-    has_digit = bool(re.search(r'\d', password))
-    has_special = bool(re.search(r'[!@#$%^&*(),.?":{}|<>]', password))
-    
-    if not (has_upper and has_lower and has_digit and has_special):
-        return False, "Password must contain uppercase, lowercase, numbers, and special characters"
-    
+    if len(password) < 15:
+        return False, "Password must be at least 15 characters long"
     return True, ""
 
 def secure_delete(filename: str) -> None:

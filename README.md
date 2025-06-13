@@ -8,7 +8,6 @@ A secure, offline tool for generating and managing Bitcoin SV (BSV) wallet seeds
 - 🎲 **Cryptographically Secure**: Uses system entropy and secure random number generation
 - 🔐 **Strong Encryption**: AES-256-GCM encryption for wallet data
 - 📱 **QR Code Support**: Generate QR codes for easy air-gapped transfer
-- 📬 **Address Generation**: Generate multiple addresses from a single seed
 - 🧪 **Self-Test Mode**: Comprehensive test suite to verify functionality
 - 🔍 **Security Checks**: Runtime security verification
 - 🛡️ **Memory Protection**: Secure memory handling and cleanup
@@ -65,23 +64,6 @@ This will:
 - `--paranoid`: Run in paranoid mode (ASCII QR only)
 - `--print-only`: Run in print-only mode (no file output)
 - `--selftest`: Run self-test and exit
-- `--addresses N`: Generate QR code with N addresses (e.g., `--addresses 1000`)
-
-### Examples
-
-```bash
-# Generate a new wallet with default settings
-./main.py
-
-# Generate a wallet and create QR code with 1000 addresses
-./main.py --addresses 1000
-
-# Generate addresses in paranoid mode (ASCII QR only)
-./main.py --addresses 1000 --paranoid
-
-# Generate addresses without saving files
-./main.py --addresses 1000 --print-only
-```
 
 ### Security Recommendations
 
@@ -96,35 +78,14 @@ This will:
 
 ## Password Requirements
 
-The tool enforces strong password requirements:
-- Minimum 12 characters
-- Must contain uppercase letters
-- Must contain lowercase letters
-- Must contain numbers
-- Must contain special characters
+The tool enforces a simple password requirement:
+- Minimum 15 characters in length
 
 ## QR Code Generation
 
 The tool can generate QR codes in two modes:
 1. **Standard Mode**: Generates both image and ASCII QR codes
 2. **Paranoid Mode**: Generates ASCII QR codes only
-
-### Types of QR Codes
-
-1. **Wallet Information QR Code**
-   - Contains mnemonic phrase
-   - Contains passphrase
-   - Contains derivation path
-   - Contains version information
-
-2. **Addresses QR Code**
-   - Contains multiple addresses
-   - Each address includes:
-     - Index number
-     - Bitcoin SV address
-     - Derivation path
-   - Formatted as JSON for easy parsing
-   - Can generate up to 1000 addresses
 
 ## Self-Test Mode
 

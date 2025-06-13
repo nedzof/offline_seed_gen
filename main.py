@@ -13,8 +13,12 @@ import subprocess
 import ctypes
 import re
 import shutil
+import random
+import hmac
+import tempfile
 from typing import Tuple, Optional, List, Dict
 from pathlib import Path
+import traceback
 
 # Add lib directory to Python path
 lib_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'lib')
@@ -29,10 +33,14 @@ from Cryptodome.Hash import SHA256
 import qrcode
 from qrcode.constants import ERROR_CORRECT_L
 from bitcoinx import BIP32PrivateKey, BIP32PublicKey, Network, Bitcoin
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import mm
 
 # Constants
 VERSION = "1.0"
 QR_DIR = "qr_bundle"
+WORDLIST_FILE = "wordlist.txt"
 
 # Required dependencies
 REQUIRED_DEPS = {
@@ -295,7 +303,7 @@ def generate_entropy(length: int = 32) -> bytes:
 
 def entropy_to_mnemonic(entropy):
     """Convert entropy to mnemonic words using BIP39 word list"""
-    with open('wordlist.txt', 'r') as f:
+    with open(WORDLIST_FILE, 'r') as f:
         wordlist = [word.strip() for word in f.readlines()]
     
     # Calculate checksum
@@ -444,7 +452,7 @@ def secure_delete(filename: str) -> None:
 def verify_wordlist_integrity() -> bool:
     WORDLIST_SHA256 = "2f5eed53a4727b4bf8880d8f3f199efc90e58503646d9ff8eff3a2ed3b24dbda"
     try:
-        with open('wordlist.txt', 'rb') as f:
+        with open(WORDLIST_FILE, 'rb') as f:
             if hashlib.sha256(f.read()).hexdigest() != WORDLIST_SHA256:
                 return False
         return True
@@ -580,27 +588,21 @@ def generate_p2pkh_addresses(mnemonic: str, passphrase: str, derivation_path: st
 def generate_qr_pdf(data: str, filename: str, paranoid: bool = False, print_only: bool = False) -> None:
     """Generate QR codes and save them to a PDF."""
     try:
-        from reportlab.pdfgen import canvas
-        from reportlab.lib.pagesizes import A4
-        from reportlab.lib.units import mm
-        
-        # Split data into chunks if it's too large
+        print(f"[DEBUG] Attempting to generate PDF: {filename}")
         max_chunk_size = 800  # Reduced chunk size for QR code compatibility
         chunks = [data[i:i + max_chunk_size] for i in range(0, len(data), max_chunk_size)]
-        
+        print(f"[DEBUG] Number of QR chunks: {len(chunks)}")
         if not paranoid and not print_only:
             os.makedirs(QR_DIR, exist_ok=True)
             pdf_path = os.path.join(QR_DIR, f"{os.path.splitext(filename)[0]}.pdf")
-            
-            # Create PDF
             c = canvas.Canvas(pdf_path, pagesize=A4)
             width, height = A4
             
-            # Calculate grid layout
-            qr_size = 25 * mm  # Size of each QR code
-            margin = 10 * mm   # Margin from page edges
-            cols = 3          # Number of columns
-            rows = 10         # Number of rows per page
+            # Optimized layout for 3 columns with large QR codes
+            qr_size = 44 * mm  # Keep the same large QR code size
+            margin = 10 * mm   # Reduced margin to fit 3 columns
+            cols = 3          # Three columns
+            rows = 4          # Adjusted rows to fit larger QR codes
             
             # Calculate spacing
             col_spacing = (width - 2 * margin - cols * qr_size) / (cols - 1)
@@ -611,99 +613,75 @@ def generate_qr_pdf(data: str, filename: str, paranoid: bool = False, print_only
             
             for i, chunk in enumerate(chunks):
                 try:
-                    # Create QR code
                     qr = qrcode.QRCode(
                         version=1,
                         error_correction=ERROR_CORRECT_L,
-                        box_size=10,
-                        border=2,  # Reduced border for smaller size
+                        box_size=20,  # Keep the same box size
+                        border=2,
                     )
                     qr.add_data(chunk)
                     qr.make(fit=True)
-                    
-                    # Create image
                     img = qr.make_image(fill_color="black", back_color="white")
-                    
-                    # Calculate position
                     row = (qr_count % (cols * rows)) // cols
                     col = qr_count % cols
-                    
-                    # If we need a new page
                     if qr_count > 0 and qr_count % (cols * rows) == 0:
                         c.showPage()
                         page_num += 1
-                    
-                    # Calculate position
                     x = margin + col * (qr_size + col_spacing)
                     y = height - margin - (row + 1) * qr_size - row * row_spacing
-                    
-                    # Save QR code to temporary file
                     temp_path = os.path.join(QR_DIR, f"temp_qr_{i}.png")
                     img.save(temp_path)
-                    
-                    # Add QR code to PDF
                     c.drawImage(temp_path, x, y, width=qr_size, height=qr_size)
-                    
-                    # Add label
-                    c.setFont("Helvetica", 8)
-                    c.drawString(x, y - 5, f"QR {i+1}/{len(chunks)}")
-                    
-                    # Clean up temporary file
+                    c.setFont("Helvetica", 10)  # Keep the same font size
+                    c.drawString(x, y - 8, f"QR {i+1}/{len(chunks)}")
                     os.remove(temp_path)
-                    
                     qr_count += 1
-                    
                 except Exception as e:
                     print(f"Warning: Failed to generate QR code {i+1}: {e}")
                     print("Trying with smaller chunk size...")
-                    # Try with a smaller chunk if this one fails
-                    smaller_chunk = chunk[:400]  # Try with half the size
+                    traceback.print_exc()
+                    smaller_chunk = chunk[:400]
                     qr = qrcode.QRCode(
                         version=1,
                         error_correction=ERROR_CORRECT_L,
-                        box_size=10,
+                        box_size=20,  # Keep the same box size
                         border=2,
                     )
                     qr.add_data(smaller_chunk)
                     qr.make(fit=True)
-                    
                     img = qr.make_image(fill_color="black", back_color="white")
-                    
-                    # Calculate position
                     row = (qr_count % (cols * rows)) // cols
                     col = qr_count % cols
-                    
-                    # If we need a new page
                     if qr_count > 0 and qr_count % (cols * rows) == 0:
                         c.showPage()
                         page_num += 1
-                    
-                    # Calculate position
                     x = margin + col * (qr_size + col_spacing)
                     y = height - margin - (row + 1) * qr_size - row * row_spacing
-                    
-                    # Save QR code to temporary file
                     temp_path = os.path.join(QR_DIR, f"temp_qr_{i}_small.png")
                     img.save(temp_path)
-                    
-                    # Add QR code to PDF
                     c.drawImage(temp_path, x, y, width=qr_size, height=qr_size)
-                    
-                    # Add label
-                    c.setFont("Helvetica", 8)
-                    c.drawString(x, y - 5, f"QR {i+1}/{len(chunks)} (small)")
-                    
-                    # Clean up temporary file
+                    c.setFont("Helvetica", 10)  # Keep the same font size
+                    c.drawString(x, y - 8, f"QR {i+1}/{len(chunks)} (small)")
                     os.remove(temp_path)
-                    
                     qr_count += 1
-            
-            # Save PDF
+            print(f"[DEBUG] Saving PDF to: {pdf_path}")
             c.save()
-            print(f"\nQR codes saved to: {pdf_path}")
-            
+            print(f"[DEBUG] PDF saved to: {pdf_path}")
+        else:
+            print("[DEBUG] Paranoid or print_only mode, not saving PDF.")
+        print(f"[DEBUG] Exiting generate_qr_pdf for {filename}")
     except Exception as e:
-        raise Exception(f"PDF generation failed: {e}")
+        print(f"[ERROR] PDF generation failed: {e}")
+        traceback.print_exc()
+        # Fallback: try to save a blank PDF for debugging
+        try:
+            pdf_path = os.path.join(QR_DIR, f"{os.path.splitext(filename)[0]}_blank.pdf")
+            c = canvas.Canvas(pdf_path, pagesize=A4)
+            c.save()
+            print(f"[DEBUG] Blank PDF saved to: {pdf_path}")
+        except Exception as e2:
+            print(f"[ERROR] Failed to save blank PDF: {e2}")
+            traceback.print_exc()
 
 def main():
     """Main function."""
@@ -758,7 +736,9 @@ def main():
                 'derivation_path': wallet_info['derivation_path'],
                 'version': wallet_info['version']
             })
+            print(f"[DEBUG] Calling generate_qr_pdf for {qr_data[:40]}... (truncated)")
             generate_qr_pdf(qr_data, "wallet_info.pdf", args.paranoid, args.print_only)
+            print(f"[DEBUG] Finished generate_qr_pdf for wallet_info.pdf")
         
         # Ask if user wants P2PKH addresses QR code
         if input("\nDo you want to generate an unencrypted QR code with 1000 P2PKH addresses? (y/n): ").lower() == 'y':

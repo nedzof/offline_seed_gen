@@ -40,8 +40,8 @@ python3 -c "
 import sys
 sys.path.insert(0, 'lib')
 try:
-    from Crypto.Cipher import AES
-    from Crypto.Protocol.KDF import scrypt
+    from Cryptodome.Cipher import AES
+    from Cryptodome.Protocol.KDF import scrypt
     import qrcode
     from reportlab.pdfgen import canvas
     from bitcoinx import BIP32PrivateKey, Bitcoin

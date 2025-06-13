@@ -260,6 +260,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument('--paranoid', action='store_true', help='Paranoid mode: ASCII QR only')
     parser.add_argument('--print-only', action='store_true', help='Print-only mode: No file output')
     parser.add_argument('--selftest', action='store_true', help='Run self-test mode')
+    parser.add_argument('--decrypt', action='store_true', help='Decrypt wallet info from QR code')
     return parser.parse_args()
 
 def check_security() -> None:
@@ -708,6 +709,20 @@ def generate_qr_pdf(data: str, filename: str, paranoid: bool = False, print_only
             print(f"[ERROR] Failed to save blank PDF: {e2}")
             traceback.print_exc()
 
+def decrypt_wallet_info(encrypted_json, password):
+    """Decrypt wallet info using the provided password."""
+    try:
+        data = json.loads(encrypted_json)
+        salt = base64.b64decode(data['salt'])
+        iv = base64.b64decode(data['iv'])
+        ciphertext = base64.b64decode(data['ciphertext'])
+        key = scrypt(password, salt, 32, N=2**14, r=8, p=1)
+        cipher = AES.new(key, AES.MODE_GCM, nonce=iv)
+        decrypted = cipher.decrypt_and_verify(ciphertext[:-16], ciphertext[-16:])
+        return decrypted.decode()
+    except Exception as e:
+        raise Exception(f"Decryption failed: {str(e)}")
+
 def main():
     """Main function."""
     try:
@@ -812,4 +827,19 @@ def main():
         sys.exit(1)
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="ElectrumSV Seed Tool")
+    parser.add_argument("--decrypt", action="store_true", help="Decrypt wallet info from QR code")
+    args = parser.parse_args()
+
+    if args.decrypt:
+        encrypted_json = input("Paste the encrypted JSON data from the QR code: ")
+        password = input("Enter your password: ")
+        try:
+            decrypted = decrypt_wallet_info(encrypted_json, password)
+            print("\nDecrypted wallet info:")
+            print(decrypted)
+        except Exception as e:
+            print(f"Error: {e}")
+        exit(0)
+
     main() 

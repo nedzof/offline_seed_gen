@@ -446,10 +446,6 @@ def secure_erase_histories():
 
 def secure_exit():
     """Securely exit the program, clearing sensitive data."""
-    resp = input(bold_cyan("\nDo you want to securely erase shell and Python history before exiting? (y/N): ")).strip().lower()
-    if resp == 'y':
-        secure_erase_histories()
-    
     # Securely delete any temporary files
     temp_files = [
         'wallet_info.txt',
@@ -457,7 +453,6 @@ def secure_exit():
     ]
     for file in temp_files:
         secure_delete(file)
-    
     print(bold_cyan("\nExiting securely. Remember to:"))
     print("1. Keep your seed phrase and derivation path safe")
     print("2. Never share your private keys")
@@ -785,8 +780,17 @@ def main():
                 break
             print(f"Password error: {error_msg}")
         
+        # Prompt for derivation path
+        print(bold_cyan("\nChoose derivation path for your wallet:"))
+        print("1. ElectrumSV (m/44'/236'/0') [recommended for BSV]")
+        print("2. Standard BIP44 (m/44'/0'/0') [legacy/other wallets]")
+        path_choice = input(bold_cyan("Enter 1 or 2 [default 1]: ")).strip()
+        if path_choice == '2':
+            derivation_path = "m/44'/0'/0'"
+        else:
+            derivation_path = "m/44'/236'/0'"
         # Generate wallet
-        wallet_info = generate_wallet()
+        wallet_info = generate_wallet(derivation_path=derivation_path)
         
         # Encrypt wallet data
         encrypted_data = encrypt_wallet_data(

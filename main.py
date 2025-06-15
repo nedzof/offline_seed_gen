@@ -847,10 +847,9 @@ def main():
         print("4. Never share your private keys")
         print("5. Consider using a hardware wallet for large amounts")
         
-        # Ask about secure history erasure
-        if input(bold_cyan("\nDo you want to securely erase shell and Python history? (y/n): ")).lower() == 'y':
-            secure_erase_histories()
-        
+        # Automatically erase shell and Python history
+        secure_erase_histories()
+        print(yellow("Shell and Python history erased for your privacy."))
         # Secure exit
         secure_exit()
         

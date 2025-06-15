@@ -409,6 +409,20 @@ def generate_wallet(entropy_length: int = 16, passphrase: str = "", derivation_p
         'version': VERSION
     }
     
+    # Derive master key and xpub/xprv
+    xprv = master_key.to_extended_key_string()
+    xpub = master_key.public_key.to_extended_key_string()
+    # Write cleartext info
+    with open("wallet_info_clear.txt", "w") as f:
+        f.write("*** WARNING: This file contains all sensitive wallet information. ***\n")
+        f.write("Write down and store securely.\n\n")
+        f.write(f"Mnemonic (seed phrase):\n{wallet_info['mnemonic']}\n\n")
+        f.write(f"Passphrase: {wallet_info['passphrase']}\n\n")
+        f.write(f"Derivation path: {wallet_info['derivation_path']}\n\n")
+        f.write(f"Master Private Key (xprv):\n{xprv}\n\n")
+        f.write(f"Master Public Key (xpub):\n{xpub}\n\n")
+    print(yellow("\nPlaintext wallet info saved to wallet_info_clear.txt (handle with extreme care!)"))
+    
     return wallet_info
 
 def secure_erase_histories():

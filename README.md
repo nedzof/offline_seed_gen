@@ -1,5 +1,7 @@
 # ElectrumSV Seed Tool
 
+**Important:** Always launch the script with `./bin/python3.10 main.py` to ensure all offline Python libraries in the `lib` folder are used. Do not use the system Python unless you have installed all dependencies globally.
+
 A secure, offline tool for generating and managing Bitcoin SV (BSV) wallet seeds with advanced security features.
 
 ## Features
@@ -46,10 +48,15 @@ cd offline_seed_gen
 
 ## Usage
 
-### Basic Usage
+```bash
+./bin/python3.10 main.py
+```
+
+- This ensures the script uses the bundled offline Python and all required libraries from the `lib` directory.
+- For decryption:
 
 ```bash
-./main.py
+./bin/python3.10 main.py --decrypt --file /path/to/wallet_info_encrypted.txt --password YOURPASSWORD
 ```
 
 This will:

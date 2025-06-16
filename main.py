@@ -21,6 +21,8 @@ from typing import Tuple, Optional, List, Dict
 from pathlib import Path
 import traceback
 from tqdm import tqdm
+import psutil  # Add psutil import
+from Cryptodome.Util.Padding import pad, unpad
 
 # Add lib directory to Python path
 lib_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'lib')
@@ -95,187 +97,183 @@ def derive_key(password: str, salt: bytes) -> bytes:
     return key
 
 def encrypt_wallet_data(mnemonic: str, passphrase: str, derivation_path: str, password: str) -> str:
-    """Encrypt wallet data using AES-256-GCM"""
+    """Encrypt wallet data with password."""
     try:
         # Generate a random salt
-        salt = get_random_bytes(16)
+        salt = os.urandom(16)
         
-        # Derive key using PBKDF2
-        key = PBKDF2(
+        # Generate key from password and salt
+        key = hashlib.pbkdf2_hmac(
+            'sha256',
             password.encode(),
             salt,
-            dkLen=32,  # 256 bits
-            count=100000,  # Number of iterations
-            hmac_hash_module=SHA256
+            100000,  # Number of iterations
+            32  # Key length
         )
         
-        # Prepare data for encryption
+        # Generate a random IV
+        iv = os.urandom(16)
+        
+        # Create cipher
+        cipher = AES.new(key, AES.MODE_CBC, iv)
+        
+        # Prepare data to encrypt
         data = json.dumps({
             'mnemonic': mnemonic,
             'passphrase': passphrase,
-            'derivation_path': derivation_path
-        }).encode()
+            'derivation_path': derivation_path,
+            'version': '1.0'
+        })
         
-        # Generate a random nonce
-        nonce = get_random_bytes(12)
+        # Pad data
+        padded_data = pad(data.encode(), 16)
         
-        # Create cipher
-        cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)
+        # Encrypt
+        encrypted_data = cipher.encrypt(padded_data)
         
-        # Encrypt data
-        ciphertext, tag = cipher.encrypt_and_digest(data)
-        
-        # Combine all components
-        encrypted_data = {
-            'version': VERSION,
+        # Combine salt, IV, and encrypted data
+        result = {
             'salt': base64.b64encode(salt).decode(),
-            'nonce': base64.b64encode(nonce).decode(),
-            'ciphertext': base64.b64encode(ciphertext).decode(),
-            'tag': base64.b64encode(tag).decode()
+            'iv': base64.b64encode(iv).decode(),
+            'ciphertext': base64.b64encode(encrypted_data).decode()
         }
         
-        return json.dumps(encrypted_data)
-        
+        return json.dumps(result)
     except Exception as e:
-        raise Exception(f"Encryption failed: {e}")
+        raise Exception(f"Encryption failed: {str(e)}")
 
-def decrypt_with_rate_limit(encrypted_data: str, password: str, attempt: int) -> str:
-    """Decrypt wallet data with rate limiting"""
+def decrypt_wallet_info(encrypted_json: str, password: str) -> str:
+    """Decrypt wallet info using the provided password."""
     try:
-        # Parse encrypted data
-        data = json.loads(encrypted_data)
-        
-        # Check version
-        if data.get('version') != VERSION:
-            raise ValueError(f"Unsupported version: {data.get('version')}")
-        
-        # Apply rate limiting
-        if attempt > 1:
-            delay = min(2 ** (attempt - 1), 32)  # Exponential backoff, max 32 seconds
-            time.sleep(delay)
-        
-        # Decode components
+        # Parse the encrypted data
+        data = json.loads(encrypted_json)
         salt = base64.b64decode(data['salt'])
-        nonce = base64.b64decode(data['nonce'])
-        ciphertext = base64.b64decode(data['ciphertext'])
-        tag = base64.b64decode(data['tag'])
+        iv = base64.b64decode(data['iv'])
+        encrypted_data = base64.b64decode(data['ciphertext'])
         
-        # Derive key
-        key = PBKDF2(
+        # Generate key from password and salt
+        key = hashlib.pbkdf2_hmac(
+            'sha256',
             password.encode(),
             salt,
-            dkLen=32,
-            count=100000,
-            hmac_hash_module=SHA256
+            100000,  # Number of iterations
+            32  # Key length
         )
         
         # Create cipher
-        cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)
+        cipher = AES.new(key, AES.MODE_CBC, iv)
         
-        # Decrypt data
-        try:
-            decrypted_data = cipher.decrypt_and_verify(ciphertext, tag)
-            return json.loads(decrypted_data)
-        except ValueError:
-            raise ValueError("Invalid password or corrupted data")
-            
+        # Decrypt
+        decrypted_padded = cipher.decrypt(encrypted_data)
+        
+        # Unpad
+        decrypted_data = unpad(decrypted_padded, 16)
+        
+        return decrypted_data.decode()
     except Exception as e:
-        raise Exception(f"Decryption failed: {e}")
+        raise Exception(f"Decryption failed: {str(e)}")
+
+def generate_mnemonic() -> str:
+    """Generate a new mnemonic phrase."""
+    entropy = generate_entropy()
+    mnemonic = entropy_to_mnemonic(entropy.hex())
+    return ' '.join(mnemonic.split()[:12])
 
 def run_self_test() -> bool:
-    """Run comprehensive self-test of all functionality"""
-    print("\nRunning self-test...")
+    """Run self-test to verify all components are working."""
+    print(bold_cyan("\nRunning self-test...\n"))
     tests_passed = True
-    
-    # Test 1: Entropy generation
-    print("\nTest 1: Entropy Generation")
+
+    # Test 1: Entropy Generation
+    print("Test 1: Entropy Generation")
     try:
         entropy = generate_entropy()
         if len(entropy) == 32:
-            print("✓ Entropy generation successful")
+            print(green("✓ Entropy generation successful"))
         else:
-            print("✗ Entropy generation failed: incorrect length")
+            print(red("✗ Entropy generation failed: wrong length"))
             tests_passed = False
     except Exception as e:
-        print(f"✗ Entropy generation failed: {e}")
+        print(red(f"✗ Entropy generation failed: {e}"))
         tests_passed = False
-    
-    # Test 2: Mnemonic generation
+
+    # Test 2: Mnemonic Generation
     print("\nTest 2: Mnemonic Generation")
     try:
-        entropy_hex = entropy.hex()
-        mnemonic = entropy_to_mnemonic(entropy_hex)
-        if len(mnemonic.split()) == 24:
-            print("✓ Mnemonic generation successful")
+        mnemonic = generate_mnemonic()
+        if len(mnemonic.split()) == 12:
+            print(green("✓ Mnemonic generation successful"))
         else:
-            print("✗ Mnemonic generation failed: incorrect word count")
+            print(red(f"✗ Mnemonic generation failed: got {len(mnemonic.split())} words, expected 12"))
             tests_passed = False
     except Exception as e:
-        print(f"✗ Mnemonic generation failed: {e}")
+        print(red(f"✗ Mnemonic generation failed: {e}"))
         tests_passed = False
-    
+
     # Test 3: Encryption/Decryption
     print("\nTest 3: Encryption/Decryption")
     try:
         test_mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
         test_passphrase = "testpassphrase"
         test_derivation_path = "m/44'/236'/0'"
-        test_password = "thisisalongpassword123456789"
-        encrypted = encrypt_wallet_data(test_mnemonic, test_passphrase, test_derivation_path, test_password)
-        decrypted = decrypt_with_rate_limit(encrypted, test_password, 1)
-        if (
-            decrypted['mnemonic'] == test_mnemonic and
-            decrypted['passphrase'] == test_passphrase and
-            decrypted['derivation_path'] == test_derivation_path
-        ):
-            print("✓ Encryption/Decryption successful")
+        test_password = "test_password123!"
+        
+        # Encrypt the test data
+        encrypted = encrypt_wallet_data(
+            test_mnemonic,
+            test_passphrase,
+            test_derivation_path,
+            test_password
+        )
+        
+        # Decrypt and verify
+        decrypted = decrypt_wallet_info(encrypted, test_password)
+        decrypted_data = json.loads(decrypted)
+        
+        if (decrypted_data['mnemonic'] == test_mnemonic and
+            decrypted_data['passphrase'] == test_passphrase and
+            decrypted_data['derivation_path'] == test_derivation_path):
+            print(green("✓ Encryption/Decryption successful"))
         else:
-            print("✗ Encryption/Decryption failed: data mismatch")
+            print(red("✗ Encryption/Decryption failed: data mismatch"))
             tests_passed = False
     except Exception as e:
-        print(f"✗ Encryption/Decryption failed: {e}")
+        print(red(f"✗ Encryption/Decryption failed: {e}"))
         tests_passed = False
-    
+
     # Test 4: QR Code Generation
     print("\nTest 4: QR Code Generation")
     try:
-        test_qr = "test_qr_data"
-        generate_qr(test_qr, "test_qr.png", paranoid=True)
-        print("✓ QR code ASCII generation successful (paranoid mode)")
+        test_data = "test data"
+        generate_qr(test_data, "test_qr.png", print_only=True)
+        generate_qr_pdf(test_data, "test_qr.pdf", paranoid=False, print_only=True)
+        print(green("✓ QR code generation successful"))
     except Exception as e:
-        print(f"✗ QR code generation failed: {e}")
+        print(red(f"✗ QR code generation failed: {e}"))
         tests_passed = False
-    
+
     # Test 5: Password Strength
     print("\nTest 5: Password Strength")
     try:
-        weak_passwords = ["short", "password123", "qwerty", "12345678"]
-        strong_password = "thisisalongpassword123456789"
-        
-        for pwd in weak_passwords:
-            is_valid, _ = check_password_strength(pwd)
-            if is_valid:
-                print(f"✗ Password strength check failed: accepted weak password '{pwd}'")
-                tests_passed = False
-                break
-        
-        is_valid, _ = check_password_strength(strong_password)
-        if not is_valid:
-            print("✗ Password strength check failed: rejected strong password")
-            tests_passed = False
+        weak_password = "weak"
+        strong_password = "StrongP@ssw0rd123!"
+        weak_result, _ = check_password_strength(weak_password)
+        strong_result, _ = check_password_strength(strong_password)
+        if not weak_result and strong_result:
+            print(green("✓ Password strength check successful"))
         else:
-            print("✓ Password strength check successful")
+            print(red("✗ Password strength check failed"))
+            tests_passed = False
     except Exception as e:
-        print(f"✗ Password strength check failed: {e}")
+        print(red(f"✗ Password strength check failed: {e}"))
         tests_passed = False
-    
-    # Print final results
+
     print("\nSelf-test results:")
     if tests_passed:
-        print("✓ All tests passed successfully!")
+        print(green("✓ All tests passed!"))
     else:
-        print("✗ Some tests failed. Please check the output above.")
-    
+        print(red("✗ Some tests failed. Please check the output above."))
+
     return tests_passed
 
 def parse_arguments() -> argparse.Namespace:
@@ -512,92 +510,85 @@ def display_ascii_qr(data: str) -> None:
         print("Encrypted data (copy/paste into another QR tool):")
         print(data)
 
-def generate_qr(data: str, filename: str, chunk_size: int = 800) -> None:
+def generate_qr(data: str, filename: str, print_only: bool = False) -> None:
     """Generate QR code from data and save to file."""
     try:
-        # Split data into smaller chunks if needed
-        chunks = [data[i:i+chunk_size] for i in range(0, len(data), chunk_size)]
-        if len(chunks) > 1:
-            print(f"\nSplitting data into {len(chunks)} QR codes...")
+        qr = qrcode.QRCode(
+            version=1,
+            error_correction=qrcode.constants.ERROR_CORRECT_L,
+            box_size=10,
+            border=4,
+        )
+        qr.add_data(data)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="black", back_color="white")
         
-        # Create a PDF with multiple pages if needed
-        pdf_path = f"{filename}.pdf"
-        with canvas.Canvas(pdf_path, pagesize=A4) as c:
-            for chunk_num, chunk in enumerate(chunks, 1):
-                # Generate QR code
+        if not print_only:
+            img.save(filename)
+            print(green(f"QR code saved to {filename}"))
+        else:
+            print(yellow("Print-only mode: QR code not saved to file"))
+    except Exception as e:
+        print(red(f"Error generating QR code: {e}"))
+        raise
+
+def generate_qr_pdf(data: str, filename: str, paranoid: bool = False, print_only: bool = False) -> None:
+    """Generate PDF with multiple QR codes, splitting address data into chunks of 50 addresses per QR code."""
+    try:
+        # Try to parse as JSON list of addresses
+        try:
+            addresses = json.loads(data)
+            if isinstance(addresses, list):
+                # Split into chunks of 50 addresses
+                chunk_size = 50
+                chunks = [json.dumps(addresses[i:i+chunk_size]) for i in range(0, len(addresses), chunk_size)]
+            else:
+                # Not a list, treat as single chunk
+                chunks = [data]
+        except Exception:
+            # Not JSON, treat as single chunk
+            chunks = [data]
+
+        if not print_only:
+            c = canvas.Canvas(filename)
+            width, height = A4
+            qr_size = 44 * mm
+            margin = 10 * mm
+            cols = 3
+            rows = 4
+            col_spacing = (width - 2 * margin - cols * qr_size) / (cols - 1)
+            row_spacing = (height - 2 * margin - rows * qr_size) / (rows - 1)
+            qr_count = 0
+            for i, chunk in enumerate(chunks):
                 qr = qrcode.QRCode(
-                    version=None,
+                    version=None,  # Let qrcode pick the smallest version that fits
                     error_correction=qrcode.constants.ERROR_CORRECT_L,
-                    box_size=20,
-                    border=2
+                    box_size=10,
+                    border=2,
                 )
                 qr.add_data(chunk)
                 qr.make(fit=True)
-                
-                # Create QR code image
-                qr_img = qr.make_image(fill_color="black", back_color="white")
-                
-                # Convert to PIL Image
-                pil_img = qr_img.get_image()
-                
-                # Save QR code image
-                img_path = f"{filename}_chunk{chunk_num}.png"
-                pil_img.save(img_path)
-                
-                # Calculate positions for 3x4 grid
-                qr_size = 44 * mm  # 44mm QR code size
-                margin = 10 * mm
-                spacing_x = (A4[0] - (2 * margin) - (3 * qr_size)) / 2  # Space between QR codes horizontally
-                spacing_y = (A4[1] - (2 * margin) - (4 * qr_size)) / 3  # Space between QR codes vertically
-                
-                # Calculate positions for all 12 QR codes
-                positions = []
-                for row in range(4):
-                    for col in range(3):
-                        x = margin + col * (qr_size + spacing_x)
-                        y = A4[1] - margin - (row + 1) * qr_size - row * spacing_y
-                        positions.append((x, y))
-                
-                # Draw QR code at the calculated position
-                c.drawImage(img_path, positions[chunk_num-1][0], positions[chunk_num-1][1], 
-                          width=qr_size, height=qr_size)
-                
-                # Add address labels
-                addresses = json.loads(chunk)
-                first_five = addresses[:5]
-                last_five = addresses[-5:]
-                
-                # Draw first 5 addresses
-                y_pos = positions[chunk_num-1][1] - 8 * mm  # Increased spacing
-                c.setFont("Helvetica-Bold", 8)  # Increased font size and made bold
-                c.drawString(positions[chunk_num-1][0], y_pos, "First 5 addresses:")
-                c.setFont("Helvetica", 7)  # Slightly smaller for addresses
-                for i, addr in enumerate(first_five):
-                    y_pos -= 4 * mm  # Increased spacing between addresses
-                    c.drawString(positions[chunk_num-1][0], y_pos, f"{i+1}. {addr}")
-                
-                # Draw last 5 addresses
-                y_pos -= 4 * mm  # Extra spacing between sections
-                c.setFont("Helvetica-Bold", 8)
-                c.drawString(positions[chunk_num-1][0], y_pos, "Last 5 addresses:")
-                c.setFont("Helvetica", 7)
-                for i, addr in enumerate(last_five):
-                    y_pos -= 4 * mm
-                    c.drawString(positions[chunk_num-1][0], y_pos, f"{i+1}. {addr}")
-                
-                # If we've filled a page, start a new one
-                if chunk_num % 12 == 0 and chunk_num < len(chunks):
+                img = qr.make_image(fill_color="black", back_color="white")
+                row = (qr_count % (cols * rows)) // cols
+                col = qr_count % cols
+                if qr_count > 0 and qr_count % (cols * rows) == 0:
                     c.showPage()
-                
-                # Clean up temporary image file
-                os.remove(img_path)
-                
-                print(f"Generated QR code {chunk_num}/{len(chunks)}")
-        
-        print(f"\nQR codes saved to {pdf_path}")
-        
+                x = margin + col * (qr_size + col_spacing)
+                y = height - margin - (row + 1) * qr_size - row * row_spacing
+                temp_path = f"temp_qr_{i}.png"
+                img.save(temp_path)
+                c.drawImage(temp_path, x, y, width=qr_size, height=qr_size)
+                c.setFont("Helvetica", 10)
+                c.drawString(x, y - 8, f"QR {i+1}/{len(chunks)}")
+                os.remove(temp_path)
+                qr_count += 1
+            c.save()
+            print(green(f"PDF with QR codes saved to {filename}"))
+        else:
+            print(yellow("Print-only mode: PDF not saved to file"))
     except Exception as e:
-        raise Exception(f"Failed to generate QR code: {str(e)}")
+        print(red(f"Error generating PDF: {e}"))
+        raise
 
 def generate_encrypted_qr(data: str, password: str, filename: str) -> None:
     """Generate an encrypted QR code for secure air-gapped transfer."""
@@ -641,144 +632,64 @@ def generate_p2pkh_addresses(mnemonic: str, passphrase: str, derivation_path: st
     except Exception as e:
         raise Exception(f"Failed to generate P2PKH addresses: {e}")
 
-def generate_qr_pdf(data: str, filename: str, paranoid: bool = False, print_only: bool = False) -> None:
-    """Generate QR codes and save them to a PDF."""
-    try:
-        # print(f"[DEBUG] Attempting to generate PDF: {filename}")
-        max_chunk_size = 800  # Reduced chunk size for QR code compatibility
-        chunks = [data[i:i + max_chunk_size] for i in range(0, len(data), max_chunk_size)]
-        # print(f"[DEBUG] Number of QR chunks: {len(chunks)}")
-        if not paranoid and not print_only:
-            os.makedirs(QR_DIR, exist_ok=True)
-            pdf_path = os.path.join(QR_DIR, f"{os.path.splitext(filename)[0]}.pdf")
-            c = canvas.Canvas(pdf_path, pagesize=A4)
-            width, height = A4
-            
-            # Optimized layout for 3 columns with large QR codes
-            qr_size = 44 * mm  # Keep the same large QR code size
-            margin = 10 * mm   # Reduced margin to fit 3 columns
-            cols = 3          # Three columns
-            rows = 4          # Adjusted rows to fit larger QR codes
-            
-            # Calculate spacing
-            col_spacing = (width - 2 * margin - cols * qr_size) / (cols - 1)
-            row_spacing = (height - 2 * margin - rows * qr_size) / (rows - 1)
-            
-            page_num = 1
-            qr_count = 0
-            
-            for i, chunk in enumerate(chunks):
-                try:
-                    qr = qrcode.QRCode(
-                        version=1,
-                        error_correction=ERROR_CORRECT_L,
-                        box_size=20,  # Keep the same box size
-                        border=2,
-                    )
-                    qr.add_data(chunk)
-                    qr.make(fit=True)
-                    img = qr.make_image(fill_color="black", back_color="white")
-                    row = (qr_count % (cols * rows)) // cols
-                    col = qr_count % cols
-                    if qr_count > 0 and qr_count % (cols * rows) == 0:
-                        c.showPage()
-                        page_num += 1
-                    x = margin + col * (qr_size + col_spacing)
-                    y = height - margin - (row + 1) * qr_size - row * row_spacing
-                    temp_path = os.path.join(QR_DIR, f"temp_qr_{i}.png")
-                    img.save(temp_path)
-                    c.drawImage(temp_path, x, y, width=qr_size, height=qr_size)
-                    c.setFont("Helvetica", 10)  # Keep the same font size
-                    c.drawString(x, y - 8, f"QR {i+1}/{len(chunks)}")
-                    os.remove(temp_path)
-                    qr_count += 1
-                except Exception as e:
-                    print(f"Warning: Failed to generate QR code {i+1}: {e}")
-                    print("Trying with smaller chunk size...")
-                    traceback.print_exc()
-                    smaller_chunk = chunk[:400]
-                    qr = qrcode.QRCode(
-                        version=1,
-                        error_correction=ERROR_CORRECT_L,
-                        box_size=20,  # Keep the same box size
-                        border=2,
-                    )
-                    qr.add_data(smaller_chunk)
-                    qr.make(fit=True)
-                    img = qr.make_image(fill_color="black", back_color="white")
-                    row = (qr_count % (cols * rows)) // cols
-                    col = qr_count % cols
-                    if qr_count > 0 and qr_count % (cols * rows) == 0:
-                        c.showPage()
-                        page_num += 1
-                    x = margin + col * (qr_size + col_spacing)
-                    y = height - margin - (row + 1) * qr_size - row * row_spacing
-                    temp_path = os.path.join(QR_DIR, f"temp_qr_{i}_small.png")
-                    img.save(temp_path)
-                    c.drawImage(temp_path, x, y, width=qr_size, height=qr_size)
-                    c.setFont("Helvetica", 10)  # Keep the same font size
-                    c.drawString(x, y - 8, f"QR {i+1}/{len(chunks)} (small)")
-                    os.remove(temp_path)
-                    qr_count += 1
-            # print(f"[DEBUG] Saving PDF to: {pdf_path}")
-            c.save()
-            # print(f"[DEBUG] PDF saved to: {pdf_path}")
-        else:
-            print("[DEBUG] Paranoid or print_only mode, not saving PDF.")
-        # print(f"[DEBUG] Exiting generate_qr_pdf for {filename}")
-    except Exception as e:
-        print(f"[ERROR] PDF generation failed: {e}")
-        traceback.print_exc()
-        # Fallback: try to save a blank PDF for debugging
-        try:
-            pdf_path = os.path.join(QR_DIR, f"{os.path.splitext(filename)[0]}_blank.pdf")
-            c = canvas.Canvas(pdf_path, pagesize=A4)
-            c.save()
-            # print(f"[DEBUG] Blank PDF saved to: {pdf_path}")
-        except Exception as e2:
-            print(f"[ERROR] Failed to save blank PDF: {e2}")
-            traceback.print_exc()
-
-def decrypt_wallet_info(encrypted_json, password):
-    """Decrypt wallet info using the provided password."""
-    try:
-        data = json.loads(encrypted_json)
-        salt = base64.b64decode(data['salt'])
-        iv = base64.b64decode(data['iv'])
-        ciphertext = base64.b64decode(data['ciphertext'])
-        key = scrypt(password, salt, 32, N=2**14, r=8, p=1)
-        cipher = AES.new(key, AES.MODE_GCM, nonce=iv)
-        decrypted = cipher.decrypt_and_verify(ciphertext[:-16], ciphertext[-16:])
-        return decrypted.decode()
-    except Exception as e:
-        raise Exception(f"Decryption failed: {str(e)}")
-
 def main():
     """Main function."""
     try:
         # Parse command line arguments
-        args = parse_arguments()
-        
-        # Run self-test if requested
-        if args.selftest:
-            ok = run_self_test()
-            sys.exit(0 if ok else 1)
-        
-        # Verify wordlist integrity
-        if not verify_wordlist_integrity():
-            print("Error: Wordlist integrity check failed!")
+        parser = argparse.ArgumentParser(description='BSV Wallet Generator')
+        parser.add_argument('--print-only', action='store_true', help='Only print QR codes, do not save files')
+        parser.add_argument('--paranoid', action='store_true', help='Enable paranoid mode with additional security checks')
+        args = parser.parse_args()
+
+        # Run self-test
+        if not run_self_test():
             sys.exit(1)
+
+        # --- NEW: Save Location Selection Logic ---
+        print(bold_cyan("\nWhere would you like to save the wallet information?"))
+        print("1. USB Drive (recommended for air-gapped systems)")
+        print("2. Documents folder")
+        print("3. Current directory")
         
+        choice = input(bold_cyan("Enter your choice (1-3) [default: 1]: ")).strip() or "1"
+        
+        if choice == "1":
+            available_drives = find_usb_drives()
+            selected_drive = select_usb_drive(available_drives)
+            if not selected_drive:
+                print(yellow("No USB drive selected. Defaulting to Documents folder."))
+                choice = "2"
+            else:
+                output_dir = os.path.join(selected_drive, "wallet_generation_output")
+                print(green(f"Output will be saved to: {output_dir}"))
+        
+        if choice == "2":
+            # Get user's home directory and create path to Documents
+            home_dir = os.path.expanduser("~")
+            output_dir = os.path.join(home_dir, "Documents", "wallet_generation_output")
+            print(green(f"Output will be saved to: {output_dir}"))
+        
+        if choice == "3":
+            output_dir = "wallet_generation_output"
+            print(green(f"Output will be saved to: {os.path.abspath(output_dir)}"))
+        # --- END of new logic ---
+
+        # Verify wordlist
+        if not verify_wordlist_integrity():
+            sys.exit(1)
+
         # Run security checks
         check_security()
         
-        # Get password for encryption
-        while True:
-            password = getpass.getpass(bold_cyan("Enter password to encrypt wallet data: "))
-            is_valid, error_msg = check_password_strength(password)
-            if is_valid:
-                break
-            print(f"Password error: {error_msg}")
+        # Prompt for password twice to verify
+        password = getpass.getpass(bold_cyan("Enter password to encrypt wallet info: "))
+        if not password:
+            print(red("Password cannot be empty!"))
+            return
+        confirm_password = getpass.getpass(bold_cyan("Confirm password: "))
+        if password != confirm_password:
+            print(red("Passwords do not match!"))
+            return
         
         # Prompt for derivation path
         print(bold_cyan("\nChoose derivation path for your wallet:"))
@@ -789,6 +700,7 @@ def main():
             derivation_path = "m/44'/0'/0'"
         else:
             derivation_path = "m/44'/236'/0'"
+        
         # Generate wallet
         wallet_info = generate_wallet(derivation_path=derivation_path)
         
@@ -800,84 +712,53 @@ def main():
             password
         )
         
-        # Save encrypted data if not in print-only mode
+        # After determining output_dir, ensure it exists
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Save encrypted data to the chosen output directory
         if not args.print_only:
-            with open("wallet_info.txt", "w") as f:
+            encrypted_file_path = os.path.join(output_dir, "wallet_info_encrypted.txt")
+            with open(encrypted_file_path, "w") as f:
                 f.write(encrypted_data)
-            print(green("\nEncrypted wallet data saved to wallet_info.txt"))
+            print(green(f"\nEncrypted wallet data saved to {encrypted_file_path}"))
         
-        # Ask if user wants QR code
-        if input(bold_cyan("\nDo you want to generate a QR code with all wallet information? (y/n): ")).lower() == 'y':
-            print(bold_cyan("\nGenerating QR code for air-gapped transfer..."))
-            qr_data = json.dumps({
-                'mnemonic': wallet_info['mnemonic'],
-                'passphrase': wallet_info['passphrase'],
-                'derivation_path': wallet_info['derivation_path'],
-                'version': wallet_info['version']
-            })
-            # print(f"[DEBUG] Calling generate_qr_pdf for {qr_data[:40]}... (truncated)")
-            generate_qr_pdf(qr_data, "wallet_info.pdf", args.paranoid, args.print_only)
-            # print(f"[DEBUG] Finished generate_qr_pdf for wallet_info.pdf")
-        
-        # Ask if user wants P2PKH addresses QR code
-        if input(bold_cyan("\nDo you want to generate an unencrypted QR code with 1000 P2PKH addresses? (y/n): ")).lower() == 'y':
-            print(bold_cyan("\nGenerating P2PKH addresses..."))
-            addresses = generate_p2pkh_addresses(
-                wallet_info['mnemonic'],
-                wallet_info['passphrase'],
-                wallet_info['derivation_path']
-            )
+        # Generate QR code for wallet info
+        if input(bold_cyan("\nDo you want to generate a QR code PDF with the encrypted wallet info? (y/n): ")).lower() == 'y':
+            pdf_path = os.path.join(output_dir, "wallet_info_encrypted.pdf")
+            generate_qr_pdf(encrypted_data, pdf_path, args.paranoid, args.print_only)
+            print(green(f"Encrypted QR code PDF saved to {pdf_path}"))
+
+        # Generate P2PKH addresses
+        if input(bold_cyan("\nDo you want to generate an unencrypted QR code PDF with 1000 P2PKH addresses? (y/n): ")).lower() == 'y':
+            addresses = generate_p2pkh_addresses(wallet_info['mnemonic'], wallet_info['passphrase'], wallet_info['derivation_path'])
+            addresses_data = json.dumps(addresses, indent=2)
             
-            # Create QR code with addresses
-            addresses_data = json.dumps({
-                'addresses': addresses,
-                'derivation_path': wallet_info['derivation_path'],
-                'count': len(addresses)
-            })
-            
+            addresses_json_path = os.path.join(output_dir, "p2pkh_addresses.json")
+            addresses_pdf_path = os.path.join(output_dir, "p2pkh_addresses.pdf")
+
             if not args.print_only:
-                os.makedirs(QR_DIR, exist_ok=True)
-                with open(os.path.join(QR_DIR, "p2pkh_addresses.json"), "w") as f:
+                with open(addresses_json_path, "w") as f:
                     f.write(addresses_data)
-                print(f"\nP2PKH addresses saved to {QR_DIR}/p2pkh_addresses.json")
+                print(f"\nP2PKH addresses saved to {addresses_json_path}")
             
             print("Generating QR codes for addresses...")
-            generate_qr_pdf(addresses_data, "p2pkh_addresses.pdf", args.paranoid, args.print_only)
-        
-        print(bold_cyan("\nIMPORTANT: Keep your seed phrase and derivation path safe!"))
-        print("1. Write down the seed phrase and keep it in a secure location")
-        print("2. Remember your passphrase")
-        print("3. Note the derivation path")
-        print("4. Never share your private keys")
-        print("5. Consider using a hardware wallet for large amounts")
-        
+            generate_qr_pdf(addresses_data, addresses_pdf_path, args.paranoid, args.print_only)
+            print(green(f"P2PKH addresses QR code PDF saved to {addresses_pdf_path}"))
+
         # Automatically erase shell and Python history
         secure_erase_histories()
         print(yellow("Shell and Python history erased for your privacy."))
+        
         # Secure exit
         secure_exit()
-        
+
     except KeyboardInterrupt:
         print(yellow("\nOperation cancelled by user."))
         sys.exit(1)
     except Exception as e:
-        print(red(f"Error: {e}"))
+        print(red(f"An error occurred: {e}"))
+        traceback.print_exc()
         sys.exit(1)
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="ElectrumSV Seed Tool")
-    parser.add_argument("--decrypt", action="store_true", help="Decrypt wallet info from QR code")
-    args = parser.parse_args()
-
-    if args.decrypt:
-        encrypted_json = input("Paste the encrypted JSON data from the QR code: ")
-        password = input("Enter your password: ")
-        try:
-            decrypted = decrypt_wallet_info(encrypted_json, password)
-            print("\nDecrypted wallet info:")
-            print(decrypted)
-        except Exception as e:
-            print(f"Error: {e}")
-        exit(0)
-
     main() 

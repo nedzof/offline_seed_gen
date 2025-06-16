@@ -681,10 +681,47 @@ def main():
     """Main function."""
     try:
         # Parse command line arguments
-        parser = argparse.ArgumentParser(description='BSV Wallet Generator')
-        parser.add_argument('--print-only', action='store_true', help='Only print QR codes, do not save files')
-        parser.add_argument('--paranoid', action='store_true', help='Enable paranoid mode with additional security checks')
+        parser = argparse.ArgumentParser(
+            description="ElectrumSV Seed Tool: Securely generate, encrypt, and manage BSV wallet seeds and addresses."
+        )
+        parser.add_argument(
+            "--print-only", action="store_true",
+            help="Only print QR codes, do not save files."
+        )
+        parser.add_argument(
+            "--paranoid", action="store_true",
+            help="Enable paranoid mode with additional security checks."
+        )
+        parser.add_argument(
+            "--decrypt", action="store_true",
+            help="Decrypt wallet info from a QR code or file."
+        )
+        parser.add_argument(
+            "--file", type=str,
+            help="Path to encrypted wallet info file for decryption (use with --decrypt)."
+        )
+        parser.add_argument(
+            "--password", type=str,
+            help="Password for decryption (use with --decrypt and --file for full automation)."
+        )
         args = parser.parse_args()
+
+        if args.decrypt:
+            print(bold_cyan("\n[Decryption Mode]"))
+            if args.file and args.password:
+                with open(os.path.expanduser(args.file), "r") as f:
+                    encrypted_json = f.read().strip()
+                password = args.password
+            else:
+                encrypted_json = input("Paste the encrypted JSON data from the QR code or file: ")
+                password = getpass.getpass(bold_cyan("Enter your password: "))
+            try:
+                decrypted = decrypt_wallet_info(encrypted_json, password)
+                print(green("\nDecrypted wallet info:"))
+                print(decrypted)
+            except Exception as e:
+                print(red(f"Error: {e}"))
+            exit(0)
 
         # Run self-test
         if not run_self_test():

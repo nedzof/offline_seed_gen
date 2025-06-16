@@ -180,100 +180,91 @@ def generate_mnemonic() -> str:
     return ' '.join(mnemonic.split()[:12])
 
 def run_self_test() -> bool:
-    """Run self-test to verify all components are working."""
-    print(bold_cyan("\nRunning self-test...\n"))
+    """Run self-test to verify all components are working (less verbose)."""
     tests_passed = True
+    results = []
 
     # Test 1: Entropy Generation
-    print("Test 1: Entropy Generation")
     try:
         entropy = generate_entropy()
         if len(entropy) == 32:
-            print(green("✓ Entropy generation successful"))
+            results.append(green("✓ Entropy generation"))
         else:
-            print(red("✗ Entropy generation failed: wrong length"))
+            results.append(red("✗ Entropy generation"))
             tests_passed = False
-    except Exception as e:
-        print(red(f"✗ Entropy generation failed: {e}"))
+    except Exception:
+        results.append(red("✗ Entropy generation"))
         tests_passed = False
 
     # Test 2: Mnemonic Generation
-    print("\nTest 2: Mnemonic Generation")
     try:
         mnemonic = generate_mnemonic()
         if len(mnemonic.split()) == 12:
-            print(green("✓ Mnemonic generation successful"))
+            results.append(green("✓ Mnemonic generation"))
         else:
-            print(red(f"✗ Mnemonic generation failed: got {len(mnemonic.split())} words, expected 12"))
+            results.append(red("✗ Mnemonic generation"))
             tests_passed = False
-    except Exception as e:
-        print(red(f"✗ Mnemonic generation failed: {e}"))
+    except Exception:
+        results.append(red("✗ Mnemonic generation"))
         tests_passed = False
 
     # Test 3: Encryption/Decryption
-    print("\nTest 3: Encryption/Decryption")
     try:
         test_mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
         test_passphrase = "testpassphrase"
         test_derivation_path = "m/44'/236'/0'"
         test_password = "test_password123!"
-        
-        # Encrypt the test data
         encrypted = encrypt_wallet_data(
             test_mnemonic,
             test_passphrase,
             test_derivation_path,
             test_password
         )
-        
-        # Decrypt and verify
         decrypted = decrypt_wallet_info(encrypted, test_password)
         decrypted_data = json.loads(decrypted)
-        
         if (decrypted_data['mnemonic'] == test_mnemonic and
             decrypted_data['passphrase'] == test_passphrase and
             decrypted_data['derivation_path'] == test_derivation_path):
-            print(green("✓ Encryption/Decryption successful"))
+            results.append(green("✓ Encryption/Decryption"))
         else:
-            print(red("✗ Encryption/Decryption failed: data mismatch"))
+            results.append(red("✗ Encryption/Decryption"))
             tests_passed = False
-    except Exception as e:
-        print(red(f"✗ Encryption/Decryption failed: {e}"))
+    except Exception:
+        results.append(red("✗ Encryption/Decryption"))
         tests_passed = False
 
     # Test 4: QR Code Generation
-    print("\nTest 4: QR Code Generation")
     try:
         test_data = "test data"
         generate_qr(test_data, "test_qr.png", print_only=True)
         generate_qr_pdf(test_data, "test_qr.pdf", paranoid=False, print_only=True)
-        print(green("✓ QR code generation successful"))
-    except Exception as e:
-        print(red(f"✗ QR code generation failed: {e}"))
+        results.append(green("✓ QR code generation"))
+    except Exception:
+        results.append(red("✗ QR code generation"))
         tests_passed = False
 
     # Test 5: Password Strength
-    print("\nTest 5: Password Strength")
     try:
         weak_password = "weak"
         strong_password = "StrongP@ssw0rd123!"
         weak_result, _ = check_password_strength(weak_password)
         strong_result, _ = check_password_strength(strong_password)
         if not weak_result and strong_result:
-            print(green("✓ Password strength check successful"))
+            results.append(green("✓ Password strength check"))
         else:
-            print(red("✗ Password strength check failed"))
+            results.append(red("✗ Password strength check"))
             tests_passed = False
-    except Exception as e:
-        print(red(f"✗ Password strength check failed: {e}"))
+    except Exception:
+        results.append(red("✗ Password strength check"))
         tests_passed = False
 
-    print("\nSelf-test results:")
+    print(bold_cyan("\nSelf-test results:"))
+    for line in results:
+        print(line)
     if tests_passed:
-        print(green("✓ All tests passed!"))
+        print(green("All tests passed!"))
     else:
-        print(red("✗ Some tests failed. Please check the output above."))
-
+        print(red("Some tests failed."))
     return tests_passed
 
 def parse_arguments() -> argparse.Namespace:
@@ -632,6 +623,57 @@ def generate_p2pkh_addresses(mnemonic: str, passphrase: str, derivation_path: st
     except Exception as e:
         raise Exception(f"Failed to generate P2PKH addresses: {e}")
 
+def find_usb_drives() -> list:
+    """
+    Finds mounted removable USB drives.
+    Returns:
+        A list of mount points (paths) for removable drives.
+    """
+    usb_drives = []
+    print(bold_cyan("\nScanning for USB drives..."))
+    partitions = psutil.disk_partitions()
+    for partition in partitions:
+        if 'removable' in partition.opts or partition.device.startswith('/dev/sd'):
+            if partition.mountpoint.startswith('/media') or partition.mountpoint.startswith('/mnt'):
+                usb_drives.append(partition.mountpoint)
+                print(green(f"Found potential USB drive: {partition.device} mounted at {partition.mountpoint}"))
+    return usb_drives
+
+def select_usb_drive(drives: list) -> str:
+    """
+    Prompts the user to select a USB drive from a list.
+    Args:
+        drives: A list of detected USB drive mount points.
+    Returns:
+        The path to the selected USB drive, or None if cancelled.
+    """
+    if not drives:
+        print(red("No USB drives found. Please insert a USB drive and ensure it is mounted."))
+        return None
+    if len(drives) == 1:
+        drive_path = drives[0]
+        print(yellow(f"\nDetected a single USB drive at: {drive_path}"))
+        confirm = input(bold_cyan("Do you want to save all output files here? (y/n): ")).lower()
+        if confirm == 'y':
+            return drive_path
+        else:
+            print(red("Operation cancelled by user."))
+            return None
+    else:
+        print(yellow("\nMultiple USB drives detected. Please choose one:"))
+        for i, drive in enumerate(drives):
+            print(f"{i + 1}: {drive}")
+        try:
+            choice = int(input(bold_cyan("Enter the number of the drive to use: "))) - 1
+            if 0 <= choice < len(drives):
+                return drives[choice]
+            else:
+                print(red("Invalid choice."))
+                return None
+        except (ValueError, IndexError):
+            print(red("Invalid input."))
+            return None
+
 def main():
     """Main function."""
     try:
@@ -646,30 +688,34 @@ def main():
             sys.exit(1)
 
         # --- NEW: Save Location Selection Logic ---
+        available_drives = find_usb_drives()
+        show_usb = len(available_drives) > 0
         print(bold_cyan("\nWhere would you like to save the wallet information?"))
-        print("1. USB Drive (recommended for air-gapped systems)")
-        print("2. Documents folder")
-        print("3. Current directory")
+        options = []
+        if show_usb:
+            print("1. USB Drive (recommended for air-gapped systems)")
+            options.append("usb")
+        print(f"{len(options)+1}. Documents folder")
+        options.append("documents")
+        print(f"{len(options)+1}. Current directory")
+        options.append("current")
         
-        choice = input(bold_cyan("Enter your choice (1-3) [default: 1]: ")).strip() or "1"
+        default_choice = 1 if show_usb else 0
+        choice = input(bold_cyan(f"Enter your choice (1-{len(options)}) [default: {default_choice+1}]: ")).strip() or str(default_choice+1)
+        choice = int(choice) - 1
         
-        if choice == "1":
-            available_drives = find_usb_drives()
+        if options[choice] == "usb":
             selected_drive = select_usb_drive(available_drives)
             if not selected_drive:
                 print(yellow("No USB drive selected. Defaulting to Documents folder."))
-                choice = "2"
+                output_dir = os.path.join(os.path.expanduser("~"), "Documents", "wallet_generation_output")
             else:
                 output_dir = os.path.join(selected_drive, "wallet_generation_output")
                 print(green(f"Output will be saved to: {output_dir}"))
-        
-        if choice == "2":
-            # Get user's home directory and create path to Documents
-            home_dir = os.path.expanduser("~")
-            output_dir = os.path.join(home_dir, "Documents", "wallet_generation_output")
+        elif options[choice] == "documents":
+            output_dir = os.path.join(os.path.expanduser("~"), "Documents", "wallet_generation_output")
             print(green(f"Output will be saved to: {output_dir}"))
-        
-        if choice == "3":
+        else:
             output_dir = "wallet_generation_output"
             print(green(f"Output will be saved to: {os.path.abspath(output_dir)}"))
         # --- END of new logic ---

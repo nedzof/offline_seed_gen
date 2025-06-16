@@ -316,8 +316,23 @@ def check_security() -> None:
     print(bold_cyan("\nSecurity checks completed."))
 
 def generate_entropy(length: int = 32) -> bytes:
-    """Generate cryptographically secure random data."""
-    return secrets.token_bytes(length)
+    """Generate cryptographically secure random data using multiple sources."""
+    try:
+        # Use secrets module as primary source
+        entropy = secrets.token_bytes(length)
+        
+        # Add additional entropy from system sources
+        if os.path.exists('/dev/urandom'):
+            with open('/dev/urandom', 'rb') as f:
+                entropy = bytes(a ^ b for a, b in zip(entropy, f.read(length)))
+        
+        # Add process-specific entropy
+        process_entropy = os.getpid().to_bytes(4, 'big') + os.getppid().to_bytes(4, 'big')
+        entropy = bytes(a ^ b for a, b in zip(entropy, process_entropy * (length // 8)))
+        
+        return entropy
+    except Exception as e:
+        raise Exception(f"Failed to generate entropy: {e}")
 
 def entropy_to_mnemonic(entropy):
     """Convert entropy to mnemonic words using BIP39 word list"""
@@ -380,6 +395,40 @@ def derive_addresses(master_key: BIP32PrivateKey, derivation_path: str, count: i
         addresses.append(address_key.public_key.to_address().to_string())
     return addresses
 
+def verify_mnemonic_backup(mnemonic: str) -> bool:
+    """
+    Verify that the user has correctly backed up their mnemonic phrase.
+    
+    Args:
+        mnemonic: The original mnemonic phrase
+        
+    Returns:
+        bool: True if verification successful, False otherwise
+    """
+    # Clear screen
+    os.system('cls' if os.name == 'nt' else 'clear')
+    
+    print(bold_cyan("\n=== Mnemonic Verification ==="))
+    print("Please enter your mnemonic phrase to verify your backup.")
+    print("Enter each word separated by spaces.")
+    print("Type 'exit' to cancel verification.")
+    print("=" * 30)
+    
+    # Get user input
+    user_input = input(bold_cyan("Enter your mnemonic phrase: ")).strip().lower()
+    
+    if user_input.lower() == 'exit':
+        return False
+    
+    # Compare with original mnemonic
+    if user_input == mnemonic.lower():
+        print(green("\n✓ Verification successful! Your backup is correct."))
+        return True
+    else:
+        print(red("\n✗ Verification failed. The entered phrase does not match."))
+        print(yellow("Please try again or restart the process."))
+        return False
+
 def generate_wallet(entropy_length: int = 16, passphrase: str = "", derivation_path: str = "m/44'/236'/0'", output_dir: str = "") -> Dict:
     """Generate a new wallet with the specified parameters."""
     # Generate entropy
@@ -387,6 +436,10 @@ def generate_wallet(entropy_length: int = 16, passphrase: str = "", derivation_p
     
     # Convert entropy to mnemonic
     mnemonic = entropy_to_mnemonic(entropy.hex())
+    
+    # Verify mnemonic backup
+    if not verify_mnemonic_backup(mnemonic):
+        raise Exception("Mnemonic verification failed. Please restart the process.")
     
     # Generate seed from mnemonic and passphrase
     seed = mnemonic_to_seed(mnemonic, passphrase)
@@ -405,6 +458,7 @@ def generate_wallet(entropy_length: int = 16, passphrase: str = "", derivation_p
     # Derive master key and xpub/xprv
     xprv = master_key.to_extended_key_string()
     xpub = master_key.public_key.to_extended_key_string()
+    
     # Write cleartext info
     clear_path = os.path.join(output_dir, "wallet_info_clear.txt")
     with open(clear_path, "w") as f:
@@ -452,28 +506,106 @@ def secure_exit():
     sys.exit(0)
     
 def check_password_strength(password: str) -> Tuple[bool, str]:
-    """Check password strength and return (is_valid, error_message)."""
-    if len(password) < 15:
-        return False, "Password must be at least 15 characters long"
-    return True, ""
-
-def secure_delete(filename: str) -> None:
-    """Securely delete a file using shred if available, otherwise overwrite."""
+    """
+    Check password strength using zxcvbn.
+    
+    Args:
+        password: Password to check
+        
+    Returns:
+        Tuple of (is_strong, feedback_message)
+    """
     try:
-        if os.path.exists(filename):
-            if shutil.which('shred'):
-                subprocess.run(['shred', '-vfz', '-n', '3', filename], check=True)
-            else:
-                # Fallback to overwriting
-                with open(filename, 'ba+', buffering=0) as f:
-                    length = f.tell()
-                    f.seek(0)
-                    f.write(os.urandom(length))
-                    f.flush()
-                    os.fsync(f.fileno())
-            os.remove(filename)
+        from zxcvbn import zxcvbn
+        results = zxcvbn(password)
+        
+        # Score: 0-4 (0 is worst, 4 is best)
+        if results['score'] < 3:
+            feedback = []
+            if results['feedback']['warning']:
+                feedback.append(results['feedback']['warning'])
+            if results['feedback']['suggestions']:
+                feedback.extend(results['feedback']['suggestions'])
+            
+            return False, "\n".join([
+                f"Password strength: {results['score']}/4",
+                f"Estimated time to crack: {results['crack_times_display']['offline_slow_hashing_1e4_per_second']}",
+                *feedback
+            ])
+        
+        return True, f"Password strength: {results['score']}/4"
+        
+    except ImportError:
+        # Fallback to basic checks if zxcvbn is not available
+        if len(password) < 15:
+            return False, "Password must be at least 15 characters long"
+        
+        has_upper = any(c.isupper() for c in password)
+        has_lower = any(c.islower() for c in password)
+        has_digit = any(c.isdigit() for c in password)
+        has_special = any(not c.isalnum() for c in password)
+        
+        if not all([has_upper, has_lower, has_digit, has_special]):
+            return False, "Password must contain uppercase, lowercase, numbers, and special characters"
+        
+        return True, "Password meets basic requirements"
+
+def secure_delete(path: str, passes: int = 3) -> None:
+    """
+    Securely delete a file by overwriting it with random data multiple times.
+    
+    Args:
+        path: Path to the file to delete
+        passes: Number of overwrite passes (default: 3)
+    """
+    if not os.path.exists(path):
+        return
+
+    try:
+        # Get file size
+        file_size = os.path.getsize(path)
+        
+        # Open file in binary read-write mode
+        with open(path, "r+b") as f:
+            for _ in range(passes):
+                # Pass 1: Overwrite with random bytes
+                f.seek(0)
+                f.write(secrets.token_bytes(file_size))
+                f.flush()
+                os.fsync(f.fileno())
+                
+                # Pass 2: Overwrite with zeros
+                f.seek(0)
+                f.write(b'\x00' * file_size)
+                f.flush()
+                os.fsync(f.fileno())
+                
+                # Pass 3: Overwrite with ones
+                f.seek(0)
+                f.write(b'\xff' * file_size)
+                f.flush()
+                os.fsync(f.fileno())
+        
+        # Truncate file to zero length
+        os.truncate(path, 0)
+        
+        # Remove the file
+        os.remove(path)
+        
+        # Overwrite the filename in the directory entry
+        dir_path = os.path.dirname(path)
+        if dir_path:
+            temp_name = os.path.join(dir_path, secrets.token_hex(8))
+            os.rename(path, temp_name)
+            os.remove(temp_name)
+            
     except Exception as e:
-        print(f"Warning: Could not securely delete {filename}: {e}")
+        print(f"Warning: Secure deletion of {path} failed: {e}")
+        # Still attempt to delete the file
+        try:
+            os.remove(path)
+        except:
+            pass
 
 def verify_wordlist_integrity() -> bool:
     WORDLIST_SHA256 = "2f5eed53a4727b4bf8880d8f3f199efc90e58503646d9ff8eff3a2ed3b24dbda"
@@ -677,6 +809,74 @@ def select_usb_drive(drives: list) -> str:
             print(red("Invalid input."))
             return None
 
+def generate_qr_code(data: str, filename: str, error_correction: int = qrcode.constants.ERROR_CORRECT_L) -> None:
+    """
+    Generate a QR code for the given data.
+    
+    Args:
+        data: Data to encode in QR code
+        filename: Output filename
+        error_correction: QR code error correction level
+    """
+    try:
+        qr = qrcode.QRCode(
+            version=1,
+            error_correction=error_correction,
+            box_size=10,
+            border=4,
+        )
+        qr.add_data(data)
+        qr.make(fit=True)
+        
+        # Create QR code image
+        qr_image = qr.make_image(fill_color="black", back_color="white")
+        
+        # Save QR code
+        qr_image.save(filename)
+        
+        # Also generate ASCII version for paranoid mode
+        ascii_filename = filename.replace('.png', '_ascii.txt')
+        with open(ascii_filename, 'w') as f:
+            f.write(qr.print_ascii())
+            
+    except Exception as e:
+        print(f"Warning: Could not generate QR code: {e}")
+
+def generate_wallet_qr_codes(wallet_info: Dict, output_dir: str, paranoid: bool = False) -> None:
+    """
+    Generate QR codes for wallet information.
+    
+    Args:
+        wallet_info: Wallet information dictionary
+        output_dir: Output directory
+        paranoid: If True, only generate ASCII QR codes
+    """
+    # Generate QR code for public data (address)
+    public_data = {
+        'address': wallet_info.get('address', ''),
+        'xpub': wallet_info.get('xpub', ''),
+        'derivation_path': wallet_info.get('derivation_path', '')
+    }
+    
+    public_qr_path = os.path.join(output_dir, "wallet_public.png")
+    generate_qr_code(json.dumps(public_data), public_qr_path)
+    print(green(f"✓ Public QR code saved: {os.path.basename(public_qr_path)}"))
+    
+    # Generate QR code for encrypted private data
+    private_data = {
+        'mnemonic': wallet_info.get('mnemonic', ''),
+        'passphrase': wallet_info.get('passphrase', ''),
+        'xprv': wallet_info.get('xprv', '')
+    }
+    
+    private_qr_path = os.path.join(output_dir, "wallet_private.png")
+    generate_qr_code(json.dumps(private_data), private_qr_path)
+    print(green(f"✓ Private QR code saved: {os.path.basename(private_qr_path)}"))
+    
+    if paranoid:
+        print(yellow("\nParanoid mode: Only ASCII QR codes have been generated."))
+        print("Please use the _ascii.txt files for maximum security.")
+
 def main():
     """Main function."""
     try:
@@ -727,39 +927,6 @@ def main():
         if not run_self_test():
             sys.exit(1)
 
-        # --- NEW: Save Location Selection Logic ---
-        available_drives = find_usb_drives()
-        show_usb = len(available_drives) > 0
-        section_header("Save Location")
-        options = []
-        if show_usb:
-            print("1. USB Drive (recommended for air-gapped systems)")
-            options.append("usb")
-        print(f"{len(options)+1}. Documents folder")
-        options.append("documents")
-        print(f"{len(options)+1}. Current directory")
-        options.append("current")
-        
-        default_choice = 1 if show_usb else 0
-        choice = input(bold_cyan(f"Enter your choice (1-{len(options)}) [default: {default_choice+1}]: ")).strip() or str(default_choice+1)
-        choice = int(choice) - 1
-        
-        if options[choice] == "usb":
-            selected_drive = select_usb_drive(available_drives)
-            if not selected_drive:
-                print(yellow("No USB drive selected. Defaulting to Documents folder."))
-                output_dir = os.path.join(os.path.expanduser("~"), "Documents", "wallet_generation_output")
-            else:
-                output_dir = os.path.join(selected_drive, "wallet_generation_output")
-                print(green(f"Output will be saved to: {output_dir}"))
-        elif options[choice] == "documents":
-            output_dir = os.path.join(os.path.expanduser("~"), "Documents", "wallet_generation_output")
-            print(green(f"Output will be saved to: {output_dir}"))
-        else:
-            output_dir = "wallet_generation_output"
-            print(green(f"Output will be saved to: {os.path.abspath(output_dir)}"))
-        # --- END of new logic ---
-
         # Verify wordlist
         if not verify_wordlist_integrity():
             sys.exit(1)
@@ -767,15 +934,24 @@ def main():
         # Run security checks
         check_security()
         
-        # Prompt for password twice to verify
-        password = getpass.getpass(bold_cyan("Enter password to encrypt wallet info: "))
-        if not password:
-            print(red("Password cannot be empty!"))
-            return
-        confirm_password = getpass.getpass(bold_cyan("Confirm password: "))
-        if password != confirm_password:
-            print(red("Passwords do not match!"))
-            return
+        # Prompt for password with strength checking
+        while True:
+            password = getpass.getpass(bold_cyan("Enter password to encrypt wallet info: "))
+            if not password:
+                print(red("Password cannot be empty!"))
+                continue
+                
+            is_strong, feedback = check_password_strength(password)
+            if not is_strong:
+                print(red(f"\nPassword is not strong enough:\n{feedback}"))
+                continue
+                
+            confirm_password = getpass.getpass(bold_cyan("Confirm password: "))
+            if password != confirm_password:
+                print(red("Passwords do not match!"))
+                continue
+                
+            break
         
         # Prompt for derivation path
         print(bold_cyan("\nChoose derivation path for your wallet:"))
@@ -798,38 +974,38 @@ def main():
             password
         )
         
-        # After determining output_dir, ensure it exists
-        os.makedirs(output_dir, exist_ok=True)
-        
-        # Save encrypted data to the chosen output directory
+        # Save encrypted data
         if not args.print_only:
             encrypted_file_path = os.path.join(output_dir, "wallet_info_encrypted.txt")
             with open(encrypted_file_path, "w") as f:
                 f.write(encrypted_data)
             print(green(f"\nEncrypted wallet data saved to {encrypted_file_path}"))
         
-        # Generate QR code for wallet info
-        if input(bold_cyan("\nDo you want to generate a QR code PDF with the encrypted wallet info? (y/n): ")).lower() == 'y':
-            pdf_path = os.path.join(output_dir, "wallet_info_encrypted.pdf")
-            generate_qr_pdf(encrypted_data, pdf_path, args.paranoid, args.print_only)
-            print(green(f"✓ Encrypted wallet QR PDF saved: {os.path.basename(pdf_path)}"))
-
+        # Generate QR codes
+        if input(bold_cyan("\nDo you want to generate QR codes for wallet info? (y/n): ")).lower() == 'y':
+            generate_wallet_qr_codes(wallet_info, output_dir, args.paranoid)
+        
         # Generate P2PKH addresses
-        if input(bold_cyan("\nDo you want to generate an unencrypted QR code PDF with 1000 P2PKH addresses? (y/n): ")).lower() == 'y':
-            addresses = generate_p2pkh_addresses(wallet_info['mnemonic'], wallet_info['passphrase'], wallet_info['derivation_path'])
+        if input(bold_cyan("\nDo you want to generate P2PKH addresses? (y/n): ")).lower() == 'y':
+            addresses = generate_p2pkh_addresses(
+                wallet_info['mnemonic'],
+                wallet_info['passphrase'],
+                wallet_info['derivation_path']
+            )
+            
+            # Save addresses
             addresses_data = json.dumps(addresses, indent=2)
-            
-            addresses_json_path = os.path.join(output_dir, "p2pkh_addresses.json")
-            addresses_pdf_path = os.path.join(output_dir, "p2pkh_addresses.pdf")
-
+            addresses_path = os.path.join(output_dir, "p2pkh_addresses.json")
             if not args.print_only:
-                with open(addresses_json_path, "w") as f:
+                with open(addresses_path, "w") as f:
                     f.write(addresses_data)
-                print(green(f"✓ Addresses saved: {os.path.basename(addresses_json_path)}"))
+                print(green(f"✓ Addresses saved: {os.path.basename(addresses_path)}"))
             
-            print("Generating QR codes for addresses...")
-            generate_qr_pdf(addresses_data, addresses_pdf_path, args.paranoid, args.print_only)
-            print(green(f"✓ Address QR PDF saved: {os.path.basename(addresses_pdf_path)}"))
+            # Generate QR code for addresses
+            if input(bold_cyan("\nDo you want to generate a QR code for the addresses? (y/n): ")).lower() == 'y':
+                addresses_qr_path = os.path.join(output_dir, "p2pkh_addresses.png")
+                generate_qr_code(addresses_data, addresses_qr_path)
+                print(green(f"✓ Address QR code saved: {os.path.basename(addresses_qr_path)}"))
 
         # Automatically erase shell and Python history
         secure_erase_histories()

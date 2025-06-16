@@ -21,9 +21,10 @@ wheels/
 *.egg
 
 # Virtual Environment
-bin/
 venv/
 ENV/
+env/
+.env/
 
 # IDE
 .idea/
@@ -31,10 +32,18 @@ ENV/
 *.swp
 *.swo
 
+# OS
+.DS_Store
+Thumbs.db
+
 # Project specific
-wallet_info.txt
-wallet_info.txt.decrypted
+wallet_generation_output/
 qr_bundle/
+*.txt
+*.pdf
+*.png
+*.json
+!wordlist.txt
 
 # Sensitive and generated files
 addresses

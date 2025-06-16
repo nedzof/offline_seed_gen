@@ -380,7 +380,7 @@ def derive_addresses(master_key: BIP32PrivateKey, derivation_path: str, count: i
         addresses.append(address_key.public_key.to_address().to_string())
     return addresses
 
-def generate_wallet(entropy_length: int = 16, passphrase: str = "", derivation_path: str = "m/44'/236'/0'") -> Dict:
+def generate_wallet(entropy_length: int = 16, passphrase: str = "", derivation_path: str = "m/44'/236'/0'", output_dir: str = "") -> Dict:
     """Generate a new wallet with the specified parameters."""
     # Generate entropy
     entropy = generate_entropy(entropy_length)
@@ -406,7 +406,8 @@ def generate_wallet(entropy_length: int = 16, passphrase: str = "", derivation_p
     xprv = master_key.to_extended_key_string()
     xpub = master_key.public_key.to_extended_key_string()
     # Write cleartext info
-    with open("wallet_info_clear.txt", "w") as f:
+    clear_path = os.path.join(output_dir, "wallet_info_clear.txt")
+    with open(clear_path, "w") as f:
         f.write("*** WARNING: This file contains all sensitive wallet information. ***\n")
         f.write("Write down and store securely.\n\n")
         f.write(f"Mnemonic (seed phrase):\n{wallet_info['mnemonic']}\n\n")
@@ -414,7 +415,7 @@ def generate_wallet(entropy_length: int = 16, passphrase: str = "", derivation_p
         f.write(f"Derivation path: {wallet_info['derivation_path']}\n\n")
         f.write(f"Master Private Key (xprv):\n{xprv}\n\n")
         f.write(f"Master Public Key (xpub):\n{xpub}\n\n")
-    print(green(f"✓ Wallet info saved (plaintext: wallet_info_clear.txt)"))
+    print(green(f"✓ Wallet info saved (plaintext: {os.path.basename(clear_path)})"))
     
     return wallet_info
 
@@ -750,7 +751,7 @@ def main():
             derivation_path = "m/44'/236'/0'"
         
         # Generate wallet
-        wallet_info = generate_wallet(derivation_path=derivation_path)
+        wallet_info = generate_wallet(derivation_path=derivation_path, output_dir=output_dir)
         
         # Encrypt wallet data
         encrypted_data = encrypt_wallet_data(

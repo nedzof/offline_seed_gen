@@ -52,4 +52,25 @@ addresses
 wallet
 info.txt
 seed_and_key.txt
-offline_seed_gen.zip 
+offline_seed_gen.zip
+
+# Additional project specific files
+*.jpg
+*.jpeg
+*.gif
+*.ico
+*.svg
+*.zip
+*.tar.gz
+*.tar
+*.rar
+*.7z
+*.log
+*.bak
+*.tmp
+*.temp
+*.swp
+*.swo
+*.swn
+*.sublime-workspace
+*.sublime-project 

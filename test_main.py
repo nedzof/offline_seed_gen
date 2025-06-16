@@ -9,7 +9,7 @@ from main import (
     mnemonic_to_seed,
     generate_wallet,
     encrypt_wallet_data,
-    decrypt_wallet_data,
+    decrypt_wallet_info,
     check_password_strength,
     verify_wordlist_integrity,
     secure_delete
@@ -41,16 +41,51 @@ class TestWalletFunctions(unittest.TestCase):
             os.rmdir(self.test_dir)
 
     def test_generate_mnemonic(self):
-        """Test mnemonic generation"""
-        mnemonic = generate_mnemonic()
-        self.assertIsInstance(mnemonic, str)
-        self.assertTrue(len(mnemonic.split()) >= 12)
+        """Test mnemonic generation with enhanced entropy sources and different strengths"""
+        # Test multiple generations to ensure uniqueness
+        mnemonics = set()
+        for _ in range(10):
+            mnemonic = generate_mnemonic()
+            self.assertIsInstance(mnemonic, str)
+            words = mnemonic.split()
+            self.assertEqual(len(words), 12, "Default mnemonic should be 12 words")
+            
+            # Verify all words are in the wordlist
+            with open(self.wordlist_path, 'r') as f:
+                wordlist = set(word.strip() for word in f.readlines())
+            for word in words:
+                self.assertIn(word, wordlist, f"Word '{word}' not in wordlist")
+            
+            mnemonics.add(mnemonic)
+        
+        # Verify we got unique mnemonics
+        self.assertEqual(len(mnemonics), 10, "Generated mnemonics should be unique")
+        
+        # Test different strengths
+        for strength in [128, 160, 192, 224, 256]:
+            mnemonic = generate_mnemonic(strength_bits=strength)
+            words = mnemonic.split()
+            expected_words = strength // 32 * 3
+            self.assertEqual(len(words), expected_words, 
+                           f"Mnemonic with {strength} bits should have {expected_words} words")
         
         # Test with specific entropy
         test_entropy = b'\x00' * 16
         mnemonic = generate_mnemonic(entropy=test_entropy)
         self.assertIsInstance(mnemonic, str)
-        self.assertTrue(len(mnemonic.split()) >= 12)
+        self.assertEqual(len(mnemonic.split()), 12)
+        
+        # Test invalid entropy lengths
+        invalid_lengths = [0, 8, 12, 24, 36]
+        for length in invalid_lengths:
+            with self.assertRaises(ValueError):
+                generate_mnemonic(entropy=b'\x00' * length)
+        
+        # Test invalid strength
+        with self.assertRaises(ValueError):
+            generate_mnemonic(strength_bits=64)  # Too weak
+        with self.assertRaises(ValueError):
+            generate_mnemonic(strength_bits=512)  # Too strong
 
     def test_mnemonic_to_seed(self):
         """Test seed generation from mnemonic"""
@@ -73,15 +108,14 @@ class TestWalletFunctions(unittest.TestCase):
         # Test encryption
         encrypted = encrypt_wallet_data(self.test_data, self.test_password)
         self.assertIsInstance(encrypted, str)
-        self.assertTrue(encrypted.startswith('v1:'))
         
         # Test decryption
-        decrypted = decrypt_wallet_data(encrypted, self.test_password)
+        decrypted = decrypt_wallet_info(encrypted, self.test_password)
         self.assertEqual(decrypted, self.test_data)
         
         # Test wrong password
         with self.assertRaises(Exception):
-            decrypt_wallet_data(encrypted, "wrong_password")
+            decrypt_wallet_info(encrypted, "wrong_password")
 
     def test_password_strength(self):
         """Test password strength checking"""

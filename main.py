@@ -70,6 +70,10 @@ YELLOW = '\033[33m'
 RED = '\033[31m'
 RESET = '\033[0m'
 
+# Add section header helper after color constants
+def section_header(title):
+    print(f"\n{BOLD}{CYAN}{'='*28}\n  {title}\n{'='*28}{RESET}")
+
 # Helper functions for colored output
 
 def bold_cyan(text):
@@ -258,13 +262,13 @@ def run_self_test() -> bool:
         results.append(red("✗ Password strength check"))
         tests_passed = False
 
-    print(bold_cyan("\nSelf-test results:"))
+    section_header("Self-Test")
     for line in results:
         print(line)
     if tests_passed:
-        print(green("All tests passed!"))
+        print(green("✓ All tests passed!"))
     else:
-        print(red("Some tests failed."))
+        print(red("✗ Some tests failed."))
     return tests_passed
 
 def parse_arguments() -> argparse.Namespace:
@@ -278,7 +282,7 @@ def parse_arguments() -> argparse.Namespace:
 
 def check_security() -> None:
     """Run security checks before proceeding"""
-    print(bold_cyan("\nRunning security checks..."))
+    section_header("Security Checks")
     
     # Check for network connectivity
     try:
@@ -410,7 +414,7 @@ def generate_wallet(entropy_length: int = 16, passphrase: str = "", derivation_p
         f.write(f"Derivation path: {wallet_info['derivation_path']}\n\n")
         f.write(f"Master Private Key (xprv):\n{xprv}\n\n")
         f.write(f"Master Public Key (xpub):\n{xpub}\n\n")
-    print(yellow("\nPlaintext wallet info saved to wallet_info_clear.txt (handle with extreme care!)"))
+    print(green(f"✓ Wallet info saved (plaintext: wallet_info_clear.txt)"))
     
     return wallet_info
 
@@ -442,10 +446,8 @@ def secure_exit():
     ]
     for file in temp_files:
         secure_delete(file)
-    print(bold_cyan("\nExiting securely. Remember to:"))
-    print("1. Keep your seed phrase and derivation path safe")
-    print("2. Never share your private keys")
-    print("3. Consider using a hardware wallet for large amounts")
+    section_header("Exit")
+    print(green("✓ Done! Keep your seed phrase and derivation path safe."))
     sys.exit(0)
     
 def check_password_strength(password: str) -> Tuple[bool, str]:
@@ -690,7 +692,7 @@ def main():
         # --- NEW: Save Location Selection Logic ---
         available_drives = find_usb_drives()
         show_usb = len(available_drives) > 0
-        print(bold_cyan("\nWhere would you like to save the wallet information?"))
+        section_header("Save Location")
         options = []
         if show_usb:
             print("1. USB Drive (recommended for air-gapped systems)")
@@ -772,7 +774,7 @@ def main():
         if input(bold_cyan("\nDo you want to generate a QR code PDF with the encrypted wallet info? (y/n): ")).lower() == 'y':
             pdf_path = os.path.join(output_dir, "wallet_info_encrypted.pdf")
             generate_qr_pdf(encrypted_data, pdf_path, args.paranoid, args.print_only)
-            print(green(f"Encrypted QR code PDF saved to {pdf_path}"))
+            print(green(f"✓ Encrypted wallet QR PDF saved: {os.path.basename(pdf_path)}"))
 
         # Generate P2PKH addresses
         if input(bold_cyan("\nDo you want to generate an unencrypted QR code PDF with 1000 P2PKH addresses? (y/n): ")).lower() == 'y':
@@ -785,11 +787,11 @@ def main():
             if not args.print_only:
                 with open(addresses_json_path, "w") as f:
                     f.write(addresses_data)
-                print(f"\nP2PKH addresses saved to {addresses_json_path}")
+                print(green(f"✓ Addresses saved: {os.path.basename(addresses_json_path)}"))
             
             print("Generating QR codes for addresses...")
             generate_qr_pdf(addresses_data, addresses_pdf_path, args.paranoid, args.print_only)
-            print(green(f"P2PKH addresses QR code PDF saved to {addresses_pdf_path}"))
+            print(green(f"✓ Address QR PDF saved: {os.path.basename(addresses_pdf_path)}"))
 
         # Automatically erase shell and Python history
         secure_erase_histories()

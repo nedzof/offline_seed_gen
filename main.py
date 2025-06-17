@@ -509,40 +509,71 @@ def is_offline() -> bool:
     except OSError:
         return True
 
-def generate_qr_codes(wallet: dict) -> None:
-    """
-    Generate QR codes for wallet information.
-    
-    Args:
-        wallet: Dictionary containing wallet information
-    """
-    import qrcode
-    import os
-    
-    # Create qr_codes directory if it doesn't exist
-    os.makedirs('qr_codes', exist_ok=True)
-    
-    # Generate QR code for mnemonic
-    qr = qrcode.QRCode(version=1, box_size=10, border=5)
-    qr.add_data(wallet['mnemonic'])
-    qr.make(fit=True)
-    img = qr.make_image(fill_color="black", back_color="white")
-    img.save('qr_codes/mnemonic.png')
-    
-    # Generate QR code for xpub
-    qr = qrcode.QRCode(version=1, box_size=10, border=5)
-    qr.add_data(wallet['xpub'])
-    qr.make(fit=True)
-    img = qr.make_image(fill_color="black", back_color="white")
-    img.save('qr_codes/xpub.png')
-    
-    # Generate QR codes for addresses
-    for i, address in enumerate(wallet['receive_addresses']):
-        qr = qrcode.QRCode(version=1, box_size=10, border=5)
-        qr.add_data(address)
-        qr.make(fit=True)
-        img = qr.make_image(fill_color="black", back_color="white")
-        img.save(f'qr_codes/address_{i+1}.png')
+def generate_qr_codes(wallet: dict, qr_count: int = 1) -> None:
+    """Generate QR codes for wallet information and addresses."""
+    try:
+        # Create qr_codes directory if it doesn't exist
+        if not os.path.exists('qr_codes'):
+            os.makedirs('qr_codes')
+        
+        # Generate QR codes for wallet info
+        generate_qr_code(wallet['mnemonic'], 'qr_codes/mnemonic.png')
+        generate_qr_code(wallet['passphrase'], 'qr_codes/passphrase.png')
+        generate_qr_code(wallet['derivation_path'], 'qr_codes/derivation_path.png')
+        generate_qr_code(wallet['xprv'], 'qr_codes/xprv.png')
+        generate_qr_code(wallet['xpub'], 'qr_codes/xpub.png')
+        
+        # Generate QR codes for addresses
+        for i in range(qr_count):
+            # Generate 50 unique random addresses
+            addresses = set()
+            while len(addresses) < 50:
+                # Generate a random index between 0 and 2^31-1 (BIP32's maximum)
+                random_index = secrets.randbelow(2**31)
+                # Derive address at this index
+                address = derive_address(wallet['xpub'], random_index)
+                addresses.add(address)
+            
+            # Convert set to sorted list for consistent ordering
+            address_list = sorted(list(addresses))
+            
+            # Create QR code with all 50 addresses
+            qr = qrcode.QRCode(
+                version=None,  # Auto-determine version
+                error_correction=qrcode.constants.ERROR_CORRECT_L,
+                box_size=10,
+                border=4,
+            )
+            
+            # Add addresses to QR code
+            for addr in address_list:
+                qr.add_data(addr + '\n')
+            
+            # Make QR code
+            qr.make(fit=True)
+            img = qr.make_image(fill_color="black", back_color="white")
+            
+            # Save QR code
+            img.save(f'qr_codes/addresses_set_{i+1}.png')
+            print(f"Generated QR code for address set {i+1}")
+        
+    except Exception as e:
+        print(f"Error generating QR codes: {str(e)}")
+        raise
+
+def derive_address(xpub: str, index: int) -> str:
+    """Derive a Bitcoin address from an XPUB at the given index."""
+    try:
+        # Import the XPUB
+        master_key = BIP32PublicKey.from_extended_key_string(xpub)
+        
+        # Derive the address at the specified index
+        child_key = master_key.child_safe(index)
+        address = child_key.to_address()
+        
+        return address
+    except Exception as e:
+        raise Exception(f"Failed to derive address: {str(e)}")
 
 def main():
     """Main function to run the wallet generator."""
@@ -550,6 +581,7 @@ def main():
         # Parse command line arguments
         parser = argparse.ArgumentParser(description='Bitcoin SV Wallet Generator')
         parser.add_argument('--decrypt', action='store_true', help='Decrypt an existing wallet')
+        parser.add_argument('--qr-count', type=int, default=1, help='Number of QR codes to generate, each containing 50 unique addresses')
         args = parser.parse_args()
 
         if args.decrypt:
@@ -568,29 +600,30 @@ def main():
             if not password:
                 raise ValueError("Password cannot be empty")
             
-            # Decrypt wallet data
-            try:
-                wallet_data = decrypt_wallet_data(encrypted_data, password)
-                
-                # Display decrypted information
-                print("\n=== Decrypted Wallet Information ===")
-                print(f"Mnemonic: {wallet_data['mnemonic']}")
-                print(f"Derivation Path: {wallet_data['derivation_path']}")
-                print(f"XPRV: {wallet_data['xprv']}")
-                print(f"XPUB: {wallet_data['xpub']}")
-                print("\nReceive Addresses:")
-                for i, address in enumerate(wallet_data['receive_addresses']):
-                    print(f"{i+1}. {address}")
-                
-                # Generate QR codes for decrypted data
-                generate_qr_codes(wallet_data)
-                print("\nQR codes generated in: qr_codes/")
-                
-            except Exception as e:
-                print(f"Error: {str(e)}")
-                sys.exit(1)
+            # Decrypt and display wallet info
+            wallet_info = decrypt_wallet_data(encrypted_data, password)
+            print("\n=== Wallet Information ===")
+            print(f"Mnemonic: {wallet_info['mnemonic']}")
+            print(f"Passphrase: {wallet_info['passphrase']}")
+            print(f"Derivation Path: {wallet_info['derivation_path']}")
+            print(f"XPRV: {wallet_info['xprv']}")
+            print(f"XPUB: {wallet_info['xpub']}")
+            
+            # Generate QR codes for the decrypted wallet
+            generate_qr_codes(wallet_info, qr_count=args.qr_count)
+            
         else:
-            # Wallet generation mode
+            # Generation mode
+            print("\n=== Wallet Generation ===")
+            
+            # Check security environment
+            check_security()
+            
+            # Verify wordlist integrity
+            if not verify_wordlist_integrity():
+                secure_exit(1)
+            
+            # Check if running offline
             if not is_offline():
                 print("Warning: Network interfaces detected. For maximum security, consider running offline.")
             
@@ -602,10 +635,17 @@ def main():
             if not password:
                 raise ValueError("Password cannot be empty")
             
+            # Verify password strength
+            is_strong, feedback = check_password_strength(password)
+            if not is_strong:
+                print(f"\nWarning: {feedback}")
+                if input("Continue anyway? (y/N): ").lower() != 'y':
+                    secure_exit(1)
+            
             # Encrypt wallet data
             encrypted_data = encrypt_wallet_data(
                 wallet['mnemonic'],
-                "",  # No passphrase for now
+                wallet['passphrase'],
                 wallet['derivation_path'],
                 wallet['xprv'],
                 wallet['xpub'],
@@ -615,24 +655,25 @@ def main():
             # Save encrypted data
             with open('wallet.encrypted', 'w') as f:
                 f.write(encrypted_data)
+            FILES_TO_CLEANUP.append('wallet.encrypted')
             
-            # Generate QR codes
-            # generate_qr_codes(wallet) # Temporarily removed for focused output
-            
-            # Display wallet information
+            # Display wallet info
             print("\n=== Wallet Information ===")
+            print(f"Mnemonic: {wallet['mnemonic']}")
+            print(f"Passphrase: {wallet['passphrase']}")
             print(f"Derivation Path: {wallet['derivation_path']}")
             print(f"XPRV: {wallet['xprv']}")
             print(f"XPUB: {wallet['xpub']}")
-            print("\nReceive Addresses:")
-            for i, address in enumerate(wallet['receive_addresses']):
-                print(f"{i+1}. {address}")
-            print("\nEncrypted wallet data saved to: wallet.encrypted")
-            print("QR codes generated in: qr_codes/")
-        
+            
+            # Generate QR codes
+            generate_qr_codes(wallet, qr_count=args.qr_count)
+            
+    except KeyboardInterrupt:
+        print("\nOperation cancelled by user")
+        secure_exit(1)
     except Exception as e:
-        print(f"Error: {str(e)}")
-        sys.exit(1)
+        print(f"\nError: {str(e)}")
+        secure_exit(1)
 
 if __name__ == "__main__":
     main() 

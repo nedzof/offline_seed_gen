@@ -22,7 +22,7 @@ from Cryptodome.Random import get_random_bytes
 from Cryptodome.Hash import SHA256
 from mnemonic import Mnemonic
 import bitcoinx
-from bitcoinx import BIP32PrivateKey, BIP32PublicKey, Bitcoin
+from bitcoinx import BIP32PrivateKey, BIP32PublicKey, Bitcoin, bip32_key_from_string
 
 # Utility Libraries
 import qrcode
@@ -563,7 +563,11 @@ def derive_address(xpub: str, index: int) -> str:
     """Derive a Bitcoin address from an XPUB at the given index."""
     try:
         # Import the XPUB using the correct method
-        master_key = BIP32PublicKey.from_string(xpub)
+        master_key = bip32_key_from_string(xpub)
+        
+        # Ensure the key is a public key
+        if not isinstance(master_key, BIP32PublicKey):
+            raise Exception("Provided extended key is not an XPUB.")
         
         # Derive the address at the specified index
         child_key = master_key.child_safe(index)

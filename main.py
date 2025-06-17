@@ -11,6 +11,7 @@ import argparse
 import secrets
 import ctypes
 from typing import Dict, List, Tuple, Optional
+import socket
 
 # Cryptography and Wallet Libraries
 from Cryptodome.Cipher import AES
@@ -285,46 +286,73 @@ def verify_mnemonic_backup(mnemonic: str) -> bool:
         print("Please try again or restart the process.")
         return False
 
-def generate_wallet(derivation_path: str, strength_bits: int = 256, passphrase: str = "") -> Dict:
-    """Generates a new wallet, including mnemonic, keys, and performs user verification."""
-    mnemonic = generate_mnemonic(strength_bits=strength_bits)
+def get_derivation_path() -> str:
+    """
+    Get the standard Bitcoin SV BIP44 derivation path.
     
-    # Clear screen
-    os.system('cls' if os.name == 'nt' else 'clear')
+    Returns:
+        str: The derivation path in the format m/44'/236'/0'/0/0
+    """
+    return "m/44'/236'/0'/0/0"  # BSV BIP44 path
+
+def generate_wallet() -> dict:
+    """
+    Generate a new wallet with mnemonic phrase and keys.
     
-    print("\n=== Your New Wallet Mnemonic ===")
-    print("IMPORTANT: Write down these words in order and keep them safe!")
-    print("Anyone with these words can access your wallet.")
-    print("=" * 40)
-    print(f"\n{mnemonic}")
-    print("\n" + "=" * 40)
-    input("\nPress Enter after you have written down the mnemonic phrase...")
+    Returns:
+        dict: Wallet information including mnemonic, keys, and addresses
+    """
+    # Generate mnemonic
+    mnemonic = generate_mnemonic()
     
+    # Display mnemonic and wait for user to write it down
+    print("\n=== IMPORTANT: Write down your mnemonic phrase ===")
+    print("This is your backup phrase. Keep it safe and secret!")
+    print("================================================")
+    print(f"\nYour mnemonic phrase:\n{mnemonic}\n")
+    print("================================================")
+    input("Press Enter after you have written down your mnemonic phrase...")
+    
+    # Verify mnemonic backup
     if not verify_mnemonic_backup(mnemonic):
-        raise Exception("Mnemonic verification failed. Aborting.")
+        raise ValueError("Mnemonic verification failed. Please try again.")
     
-    seed = mnemonic_to_seed(mnemonic, passphrase)
-    master_key = seed_to_master_key(seed)
+    # Generate seed from mnemonic
+    seed = mnemonic_to_seed(mnemonic)
+    
+    # Generate master key with Bitcoin network
+    master_key = BIP32PrivateKey.from_seed(seed, network=Bitcoin)
+    
+    # Get derivation path
+    derivation_path = get_derivation_path()
+    
+    # Derive child key
+    child_key = master_key.child(0).child(0)
+    
+    # Get extended keys
+    xprv = master_key.to_extended_key_string()
+    xpub = master_key.public_key.to_extended_key_string()
     
     # Generate first 5 receive addresses
     receive_addresses = []
     for i in range(5):
-        # Derive child key using the correct method
-        child_key = master_key.child(0).child(i)  # First derive change=0, then index
-        receive_addresses.append(child_key.public_key.to_address())
+        child_key = master_key.child(0).child(i)
+        address = child_key.public_key.to_address()
+        receive_addresses.append(address)
     
+    # Create wallet info dictionary
     wallet_info = {
         'mnemonic': mnemonic,
-        'passphrase': passphrase,
+        'seed': seed.hex(),
+        'xprv': xprv,
+        'xpub': xpub,
         'derivation_path': derivation_path,
-        'xprv': master_key.to_extended_key_string(),
-        'xpub': master_key.public_key.to_extended_key_string(),
-        'receive_addresses': receive_addresses,
-        'version': "1.0"
+        'receive_addresses': receive_addresses
     }
+    
     return wallet_info
 
-def encrypt_wallet_data(mnemonic: str, passphrase: str, derivation_path: str, password: str) -> str:
+def encrypt_wallet_data(mnemonic: str, passphrase: str, derivation_path: str, xprv: str, xpub: str, password: str) -> str:
     """
     Encrypt wallet data using AES-GCM with a strong password.
     
@@ -332,6 +360,8 @@ def encrypt_wallet_data(mnemonic: str, passphrase: str, derivation_path: str, pa
         mnemonic: The mnemonic phrase
         passphrase: The passphrase
         derivation_path: The derivation path
+        xprv: The extended private key
+        xpub: The extended public key
         password: The encryption password
         
     Returns:
@@ -346,14 +376,16 @@ def encrypt_wallet_data(mnemonic: str, passphrase: str, derivation_path: str, pa
         salt,
         dkLen=32,
         count=PBKDF2_ITERATIONS,
-        hmac_hash_module=SHA256  # Use SHA256 module instead of hashlib.sha256
+        hmac_hash_module=SHA256
     )
     
     # Prepare data for encryption
     data = {
         'mnemonic': mnemonic,
         'passphrase': passphrase,
-        'derivation_path': derivation_path
+        'derivation_path': derivation_path,
+        'xprv': xprv,
+        'xpub': xpub
     }
     data_bytes = json.dumps(data).encode()
     
@@ -454,79 +486,101 @@ def generate_wallet_qr_codes(wallet_info: Dict, encrypted_data: str, output_dir:
     generate_qr_code(encrypted_data, private_qr_path)
     FILES_TO_CLEANUP.append(private_qr_path)
 
-def main():
-    """Main function to handle wallet generation and management."""
+def is_offline() -> bool:
+    """
+    Check if the system is running offline by attempting to connect to a reliable host.
+    
+    Returns:
+        bool: True if offline, False if online
+    """
     try:
-        # Parse command line arguments
-        parser = argparse.ArgumentParser(description='Secure Bitcoin SV Wallet Generator')
-        parser.add_argument('--decrypt', action='store_true', help='Decrypt an existing wallet')
-        parser.add_argument('--output-dir', default='.', help='Directory for output files')
-        parser.add_argument('--paranoid', action='store_true', help='Enable paranoid mode (no QR codes)')
-        args = parser.parse_args()
+        # Try to connect to a reliable host
+        socket.create_connection(("8.8.8.8", 53), timeout=1)
+        return False
+    except OSError:
+        return True
 
-        # Check security environment
-        check_security()
+def generate_qr_codes(wallet: dict) -> None:
+    """
+    Generate QR codes for wallet information.
+    
+    Args:
+        wallet: Dictionary containing wallet information
+    """
+    import qrcode
+    import os
+    
+    # Create qr_codes directory if it doesn't exist
+    os.makedirs('qr_codes', exist_ok=True)
+    
+    # Generate QR code for mnemonic
+    qr = qrcode.QRCode(version=1, box_size=10, border=5)
+    qr.add_data(wallet['mnemonic'])
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white")
+    img.save('qr_codes/mnemonic.png')
+    
+    # Generate QR code for xpub
+    qr = qrcode.QRCode(version=1, box_size=10, border=5)
+    qr.add_data(wallet['xpub'])
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white")
+    img.save('qr_codes/xpub.png')
+    
+    # Generate QR codes for addresses
+    for i, address in enumerate(wallet['receive_addresses']):
+        qr = qrcode.QRCode(version=1, box_size=10, border=5)
+        qr.add_data(address)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="black", back_color="white")
+        img.save(f'qr_codes/address_{i+1}.png')
 
-        # Verify wordlist integrity
-        if not verify_wordlist_integrity():
-            secure_exit(1)
-
-        if args.decrypt:
-            # Handle decryption
-            encrypted_data = input("Enter encrypted wallet data: ")
-            password = getpass.getpass("Enter password: ")
-            try:
-                decrypted_data = decrypt_wallet_info(encrypted_data, password)
-                print("\nDecrypted wallet information:")
-                print(decrypted_data)
-            except Exception as e:
-                print(f"Decryption failed: {str(e)}")
-                secure_exit(1)
-        else:
-            # Generate new wallet
-            while True:
-                password = getpass.getpass("Enter a strong password for wallet encryption: ")
-                is_strong, feedback = check_password_strength(password)
-                if is_strong:
-                    break
-                print(f"\n{feedback}\n")
-
-            # Generate wallet
-            wallet = generate_wallet(
-                derivation_path="m/44'/236'/0'/0/0",  # BSV BIP44 path
-                strength_bits=256,  # 24 words for maximum security
-                passphrase=""  # Optional BIP39 passphrase
-            )
-
-            # Encrypt wallet data
-            encrypted_data = encrypt_wallet_data(
-                wallet['mnemonic'],
-                wallet['passphrase'],
-                wallet['derivation_path'],
-                password
-            )
-
-            # Display wallet information
-            print("\n=== Wallet Information ===")
-            print(f"Derivation Path: {wallet['derivation_path']}")
-            print("\nReceive Addresses:")
-            for i, address in enumerate(wallet['receive_addresses']):
-                print(f"Address {i}: {address}")
-            
-            print("\nEncrypted Wallet Data (save this securely):")
-            print(encrypted_data)
-
-            # Generate QR codes
-            if not args.paranoid:
-                generate_wallet_qr_codes(wallet, encrypted_data, args.output_dir, args.paranoid)
-                print(f"\nQR codes have been generated in: {args.output_dir}")
-
-    except KeyboardInterrupt:
-        print("\nOperation cancelled by user")
-        secure_exit(1)
+def main():
+    """Main function to run the wallet generator."""
+    try:
+        # Check if running offline
+        if not is_offline():
+            print("Warning: Network interfaces detected. For maximum security, consider running offline.")
+        
+        # Generate wallet
+        wallet = generate_wallet()
+        
+        # Get encryption password
+        password = getpass.getpass("Enter a strong password for wallet encryption: ")
+        if not password:
+            raise ValueError("Password cannot be empty")
+        
+        # Encrypt wallet data
+        encrypted_data = encrypt_wallet_data(
+            wallet['mnemonic'],
+            "",  # No passphrase for now
+            wallet['derivation_path'],
+            wallet['xprv'],
+            wallet['xpub'],
+            password
+        )
+        
+        # Save encrypted data
+        with open('wallet.encrypted', 'w') as f:
+            f.write(encrypted_data)
+        
+        # Generate QR codes
+        generate_qr_codes(wallet)
+        
+        # Display wallet information
+        print("\n=== Wallet Information ===")
+        print(f"Derivation Path: {wallet['derivation_path']}")
+        print(f"XPRV: {wallet['xprv']}")
+        print(f"XPUB: {wallet['xpub']}")
+        print("\nReceive Addresses:")
+        for i, address in enumerate(wallet['receive_addresses']):
+            print(f"{i+1}. {address}")
+        print("\nEncrypted wallet data saved to: wallet.encrypted")
+        print("QR codes generated in: qr_codes/")
+        
     except Exception as e:
         print(f"Error: {str(e)}")
-        secure_exit(1)
+        sys.exit(1)
 
 if __name__ == "__main__":
     main() 

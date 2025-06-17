@@ -323,17 +323,6 @@ def generate_wallet(mnemonic_phrase: Optional[str] = None) -> dict:
     xprv = account_master_key.to_extended_key_string()
     xpub = account_master_key.public_key.to_extended_key_string()
 
-    # Print raw extended private key for debugging
-    raw_extended_prv_key = account_master_key._extended_key()
-    print(f"\n--- Debugging Raw Extended Private Key ---")
-    print(f"Raw Extended PRV (hex): {raw_extended_prv_key.hex()}")
-    print(f"------------------------------------------")
-    
-    # Print raw components for debugging
-    print(f"\n--- Debugging Account Master Key Object ---")
-    print(f"Account Master Key Object: {account_master_key}")
-    print(f"---------------------------------------------")
-    
     # Generate first 5 receive addresses from the account master key
     receive_addresses = []
     for i in range(5):

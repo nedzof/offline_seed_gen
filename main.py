@@ -288,11 +288,30 @@ def verify_mnemonic_backup(mnemonic: str) -> bool:
 def generate_wallet(derivation_path: str, strength_bits: int = 256, passphrase: str = "") -> Dict:
     """Generates a new wallet, including mnemonic, keys, and performs user verification."""
     mnemonic = generate_mnemonic(strength_bits=strength_bits)
+    
+    # Clear screen
+    os.system('cls' if os.name == 'nt' else 'clear')
+    
+    print("\n=== Your New Wallet Mnemonic ===")
+    print("IMPORTANT: Write down these words in order and keep them safe!")
+    print("Anyone with these words can access your wallet.")
+    print("=" * 40)
+    print(f"\n{mnemonic}")
+    print("\n" + "=" * 40)
+    input("\nPress Enter after you have written down the mnemonic phrase...")
+    
     if not verify_mnemonic_backup(mnemonic):
         raise Exception("Mnemonic verification failed. Aborting.")
     
     seed = mnemonic_to_seed(mnemonic, passphrase)
     master_key = seed_to_master_key(seed)
+    
+    # Generate first 5 receive addresses
+    receive_addresses = []
+    for i in range(5):
+        # Derive child key using the correct method
+        child_key = master_key.child(0).child(i)  # First derive change=0, then index
+        receive_addresses.append(child_key.public_key.to_address())
     
     wallet_info = {
         'mnemonic': mnemonic,
@@ -300,6 +319,7 @@ def generate_wallet(derivation_path: str, strength_bits: int = 256, passphrase: 
         'derivation_path': derivation_path,
         'xprv': master_key.to_extended_key_string(),
         'xpub': master_key.public_key.to_extended_key_string(),
+        'receive_addresses': receive_addresses,
         'version': "1.0"
     }
     return wallet_info
@@ -326,7 +346,7 @@ def encrypt_wallet_data(mnemonic: str, passphrase: str, derivation_path: str, pa
         salt,
         dkLen=32,
         count=PBKDF2_ITERATIONS,
-        hmac_hash_module=hashlib.sha256
+        hmac_hash_module=SHA256  # Use SHA256 module instead of hashlib.sha256
     )
     
     # Prepare data for encryption
@@ -379,7 +399,7 @@ def decrypt_wallet_info(encrypted_data: str, password: str) -> str:
             salt,
             dkLen=32,
             count=PBKDF2_ITERATIONS,
-            hmac_hash_module=hashlib.sha256
+            hmac_hash_module=SHA256
         )
         
         # Create cipher and decrypt
@@ -434,112 +454,73 @@ def generate_wallet_qr_codes(wallet_info: Dict, encrypted_data: str, output_dir:
     generate_qr_code(encrypted_data, private_qr_path)
     FILES_TO_CLEANUP.append(private_qr_path)
 
-def main() -> None:
-    """
-    Main function to handle wallet generation and management.
-    """
+def main():
+    """Main function to handle wallet generation and management."""
     try:
         # Parse command line arguments
         parser = argparse.ArgumentParser(description='Secure Bitcoin SV Wallet Generator')
-        parser.add_argument('--print-only', action='store_true', help='Only print wallet info, no files')
-        parser.add_argument('--paranoid', action='store_true', help='Enable paranoid mode (no files)')
-        parser.add_argument('--decrypt', action='store_true', help='Decrypt wallet info')
-        parser.add_argument('--file', type=str, help='Path to encrypted wallet file')
-        parser.add_argument('--password', type=str, help='Password for decryption')
+        parser.add_argument('--decrypt', action='store_true', help='Decrypt an existing wallet')
+        parser.add_argument('--output-dir', default='.', help='Directory for output files')
+        parser.add_argument('--paranoid', action='store_true', help='Enable paranoid mode (no QR codes)')
         args = parser.parse_args()
-        
+
         # Check security environment
         check_security()
-        
+
         # Verify wordlist integrity
         if not verify_wordlist_integrity():
-            print("Error: Wordlist verification failed")
             secure_exit(1)
-        
-        # Handle decryption mode
+
         if args.decrypt:
-            if args.file and args.password:
-                # Automated decryption
-                try:
-                    with open(args.file, 'r') as f:
-                        encrypted_data = f.read()
-                    decrypted = decrypt_wallet_info(encrypted_data, args.password)
-                    print("\nDecrypted wallet information:")
-                    print(json.dumps(decrypted, indent=2))
-                    secure_exit(0)
-                except Exception as e:
-                    print(f"Error decrypting file: {str(e)}")
-                    secure_exit(1)
-            else:
-                # Interactive decryption
-                encrypted_data = input("Enter encrypted wallet data: ")
-                password = getpass.getpass("Enter password: ")
-                try:
-                    decrypted = decrypt_wallet_info(encrypted_data, password)
-                    print("\nDecrypted wallet information:")
-                    print(json.dumps(decrypted, indent=2))
-                    secure_exit(0)
-                except Exception as e:
-                    print(f"Error decrypting data: {str(e)}")
-                    secure_exit(1)
-        
-        # Get password with strength check
-        while True:
-            password = getpass.getpass("Enter a strong password for encryption: ")
-            is_strong, feedback = check_password_strength(password)
-            if is_strong:
-                break
-            print(feedback)
-        
-        # Confirm password
-        if getpass.getpass("Confirm password: ") != password:
-            print("Passwords do not match")
-            secure_exit(1)
-        
-        # Get derivation path
-        derivation_path = input("Enter derivation path (default: m/44'/236'/0'/0/0): ").strip()
-        if not derivation_path:
-            derivation_path = "m/44'/236'/0'/0/0"
-        
-        # Generate wallet
-        wallet = generate_wallet(derivation_path=derivation_path)
-        
-        # Encrypt wallet data
-        encrypted = encrypt_wallet_data(
-            wallet['mnemonic'],
-            wallet['passphrase'],
-            wallet['derivation_path'],
-            password
-        )
-        
-        # Handle output based on mode
-        if args.paranoid:
-            print("\nEncrypted wallet data (save this securely):")
-            print(encrypted)
-        elif args.print_only:
-            print("\nWallet information:")
-            print(json.dumps(wallet, indent=2))
-            print("\nEncrypted wallet data:")
-            print(encrypted)
+            # Handle decryption
+            encrypted_data = input("Enter encrypted wallet data: ")
+            password = getpass.getpass("Enter password: ")
+            try:
+                decrypted_data = decrypt_wallet_info(encrypted_data, password)
+                print("\nDecrypted wallet information:")
+                print(decrypted_data)
+            except Exception as e:
+                print(f"Decryption failed: {str(e)}")
+                secure_exit(1)
         else:
-            # Save to file
-            output_dir = "wallet_output"
-            os.makedirs(output_dir, exist_ok=True)
+            # Generate new wallet
+            while True:
+                password = getpass.getpass("Enter a strong password for wallet encryption: ")
+                is_strong, feedback = check_password_strength(password)
+                if is_strong:
+                    break
+                print(f"\n{feedback}\n")
+
+            # Generate wallet
+            wallet = generate_wallet(
+                derivation_path="m/44'/236'/0'/0/0",  # BSV BIP44 path
+                strength_bits=256,  # 24 words for maximum security
+                passphrase=""  # Optional BIP39 passphrase
+            )
+
+            # Encrypt wallet data
+            encrypted_data = encrypt_wallet_data(
+                wallet['mnemonic'],
+                wallet['passphrase'],
+                wallet['derivation_path'],
+                password
+            )
+
+            # Display wallet information
+            print("\n=== Wallet Information ===")
+            print(f"Derivation Path: {wallet['derivation_path']}")
+            print("\nReceive Addresses:")
+            for i, address in enumerate(wallet['receive_addresses']):
+                print(f"Address {i}: {address}")
             
-            # Save encrypted data
-            encrypted_file = os.path.join(output_dir, "wallet_encrypted.json")
-            with open(encrypted_file, 'w') as f:
-                f.write(encrypted)
-            FILES_TO_CLEANUP.append(encrypted_file)
-            
+            print("\nEncrypted Wallet Data (save this securely):")
+            print(encrypted_data)
+
             # Generate QR codes
-            generate_wallet_qr_codes(wallet, encrypted, output_dir, args.paranoid)
-            
-            print(f"\nWallet information saved to {output_dir}/")
-            print("Remember to securely delete these files after backing up!")
-        
-        secure_exit(0)
-        
+            if not args.paranoid:
+                generate_wallet_qr_codes(wallet, encrypted_data, args.output_dir, args.paranoid)
+                print(f"\nQR codes have been generated in: {args.output_dir}")
+
     except KeyboardInterrupt:
         print("\nOperation cancelled by user")
         secure_exit(1)
@@ -547,5 +528,5 @@ def main() -> None:
         print(f"Error: {str(e)}")
         secure_exit(1)
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main() 

@@ -23,8 +23,6 @@ wheels/
 # Virtual Environment
 venv/
 ENV/
-env/
-.env/
 
 # IDE
 .idea/
@@ -37,13 +35,21 @@ env/
 Thumbs.db
 
 # Project specific
-wallet_generation_output/
-qr_bundle/
-*.txt
-*.pdf
 *.png
-*.json
-!wordlist.txt
+*.jpg
+*.jpeg
+*.gif
+*.ico
+*.svg
+*.pdf
+*.zip
+*.tar.gz
+*.tar
+*.rar
+*.7z
+*.bak
+*.tmp
+*.log
 
 # Sensitive and generated files
 addresses
@@ -55,22 +61,12 @@ seed_and_key.txt
 offline_seed_gen.zip
 
 # Additional project specific files
-*.jpg
-*.jpeg
-*.gif
-*.ico
-*.svg
-*.zip
-*.tar.gz
-*.tar
-*.rar
-*.7z
-*.log
-*.bak
-*.tmp
-*.temp
-*.swp
-*.swo
-*.swn
-*.sublime-workspace
-*.sublime-project 
+*.egg-info/
+*.egg
+*.txt
+*.pdf
+*.json
+!wordlist.txt
+
+# Keep requirements.txt
+!requirements.txt 

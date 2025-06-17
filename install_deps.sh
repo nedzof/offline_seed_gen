@@ -1,61 +1,64 @@
 #!/bin/bash
 
-# Exit on error
-set -e
+# Exit on any error, on unset variables, and on pipeline failures
+set -euo pipefail
 
-PYTHON=bin/python3.10
-PIP="$PYTHON -m pip"
+# --- Configuration ---
+# Allow overriding the Python executable via an environment variable.
+# Default to 'python3' if PYTHON_EXEC is not set.
+PYTHON_EXEC=${PYTHON_EXEC:-python3}
+PIP_COMMAND="$PYTHON_EXEC -m pip"
+LIB_DIR="lib"
+REQUIREMENTS_FILE="requirements.txt"
 
-echo "Starting dependency installation using $PYTHON..."
-
-# Create lib directory if it doesn't exist
-mkdir -p lib
-
-# Function to check if a command exists
-command_exists() {
-    command -v "$1" >/dev/null 2>&1
-}
+# --- Main Script ---
+echo "--- Starting Dependency Installation ---"
+echo "Using Python: $($PYTHON_EXEC --version)"
+echo "Installing to: $LIB_DIR/"
 
 # Check for required tools
-if [ ! -f "$PYTHON" ]; then
-    echo "Error: $PYTHON not found. Please ensure your custom Python is installed."
+if ! command -v "$PYTHON_EXEC" >/dev/null 2>&1; then
+    echo "Error: '$PYTHON_EXEC' not found in PATH. Please install it or set the PYTHON_EXEC environment variable."
     exit 1
 fi
 
-# Install dependencies locally with specific versions
-echo "Installing dependencies..."
-$PIP install --upgrade pip
-$PIP install --target=lib \
-    pycryptodomex==3.19.0 \
-    qrcode==7.4.2 \
-    reportlab==4.0.8 \
-    bitcoinx==0.9.0 \
-    electrumsv-secp256k1==18.0.0 \
-    pillow==11.2.1 \
-    typing-extensions==4.14.0 \
-    pypng==0.20220715.0 \
-    attrs==25.3.0 \
-    cffi==1.17.1 \
-    pycparser==2.22
+# Check for requirements.txt
+if [ ! -f "$REQUIREMENTS_FILE" ]; then
+    echo "Error: '$REQUIREMENTS_FILE' not found. Please create it with the necessary dependencies."
+    exit 1
+fi
 
-# Verify critical dependencies
-echo "Verifying installations..."
-$PYTHON -c '
+# Create lib directory
+mkdir -p "$LIB_DIR"
+
+# Install/upgrade pip and install dependencies from requirements.txt
+echo "Upgrading pip..."
+$PIP_COMMAND install --upgrade pip
+
+echo "Installing dependencies from $REQUIREMENTS_FILE..."
+$PIP_COMMAND install --target="$LIB_DIR" -r "$REQUIREMENTS_FILE"
+
+# --- Verification ---
+echo "Verifying critical dependencies..."
+# This verification script now checks for the *actual* direct dependencies
+$PYTHON_EXEC -c '
 import sys
+# Add the local lib directory to the path for this check
 sys.path.insert(0, "lib")
 try:
     from Cryptodome.Cipher import AES
-    from Cryptodome.Protocol.KDF import scrypt
+    from Cryptodome.Protocol.KDF import PBKDF2
     import qrcode
-    from reportlab.pdfgen import canvas
-    from bitcoinx import BIP32PrivateKey, Bitcoin
-    from electrumsv_secp256k1 import create_context
-    from PIL import Image
-    print("All critical dependencies verified successfully.")
+    from mnemonic import Mnemonic
+    import bitcoinx
+    import psutil
+    import zxcvbn
+    print("✅ All critical dependencies verified successfully.")
 except ImportError as e:
-    print(f"Error: Failed to import {str(e)}")
+    print(f"❌ Error: Dependency verification failed. Could not import: {e}")
     sys.exit(1)
 '
 
-echo "Dependencies installed and verified successfully in lib directory"
-echo "You can now run the script offline using: $PYTHON main.py" 
+echo "---"
+echo "✅ Dependency installation complete."
+echo "You can now run the main script in an offline environment." 

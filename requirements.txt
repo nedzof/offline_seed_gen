@@ -1,0 +1,7 @@
+# Direct dependencies for the secure wallet generator
+pycryptodomex==3.19.0
+qrcode[pil]==7.4.2
+mnemonic==0.20
+bitcoinx==0.9.0
+psutil==5.9.8
+zxcvbn==4.4.28 

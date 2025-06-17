@@ -406,24 +406,26 @@ def encrypt_wallet_data(mnemonic: str, passphrase: str, derivation_path: str, xp
     
     return json.dumps(encrypted)
 
-def decrypt_wallet_info(encrypted_data: str, password: str) -> str:
+def decrypt_wallet_data(encrypted_data: str, password: str) -> dict:
     """
     Decrypt wallet data using AES-GCM.
     
     Args:
         encrypted_data: Base64-encoded encrypted data
-        password: The decryption password
+        password: The encryption password
         
     Returns:
-        Decrypted wallet data as JSON string
+        dict: Decrypted wallet data
     """
     try:
         # Parse encrypted data
-        data = json.loads(encrypted_data)
-        salt = base64.b64decode(data['salt'])
-        nonce = base64.b64decode(data['nonce'])
-        ciphertext = base64.b64decode(data['ciphertext'])
-        tag = base64.b64decode(data['tag'])
+        encrypted = json.loads(encrypted_data)
+        
+        # Decode components
+        salt = base64.b64decode(encrypted['salt'])
+        nonce = base64.b64decode(encrypted['nonce'])
+        ciphertext = base64.b64decode(encrypted['ciphertext'])
+        tag = base64.b64decode(encrypted['tag'])
         
         # Derive key from password
         key = PBKDF2(
@@ -436,11 +438,28 @@ def decrypt_wallet_info(encrypted_data: str, password: str) -> str:
         
         # Create cipher and decrypt
         cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)
-        decrypted = cipher.decrypt_and_verify(ciphertext, tag)
+        data_bytes = cipher.decrypt_and_verify(ciphertext, tag)
         
-        return decrypted.decode()
+        # Parse decrypted data
+        wallet_data = json.loads(data_bytes.decode())
+        
+        # Regenerate receive addresses from xprv
+        from bitcoinx.bip32 import bip32_key_from_string
+        master_key = bip32_key_from_string(wallet_data['xprv'])
+        receive_addresses = []
+        
+        # Generate first 5 receive addresses
+        for i in range(5):
+            child_key = master_key.child(0).child(i)
+            address = child_key.public_key.to_address()
+            receive_addresses.append(address)
+        
+        # Add receive addresses to wallet data
+        wallet_data['receive_addresses'] = receive_addresses
+        
+        return wallet_data
     except Exception as e:
-        raise Exception(f"Decryption failed: {str(e)}")
+        raise ValueError(f"Decryption failed: {str(e)}")
 
 def generate_qr_code(data: str, filename: str, error_correction: int = qrcode.constants.ERROR_CORRECT_L) -> None:
     """
@@ -538,45 +557,88 @@ def generate_qr_codes(wallet: dict) -> None:
 def main():
     """Main function to run the wallet generator."""
     try:
-        # Check if running offline
-        if not is_offline():
-            print("Warning: Network interfaces detected. For maximum security, consider running offline.")
-        
-        # Generate wallet
-        wallet = generate_wallet()
-        
-        # Get encryption password
-        password = getpass.getpass("Enter a strong password for wallet encryption: ")
-        if not password:
-            raise ValueError("Password cannot be empty")
-        
-        # Encrypt wallet data
-        encrypted_data = encrypt_wallet_data(
-            wallet['mnemonic'],
-            "",  # No passphrase for now
-            wallet['derivation_path'],
-            wallet['xprv'],
-            wallet['xpub'],
-            password
-        )
-        
-        # Save encrypted data
-        with open('wallet.encrypted', 'w') as f:
-            f.write(encrypted_data)
-        
-        # Generate QR codes
-        generate_qr_codes(wallet)
-        
-        # Display wallet information
-        print("\n=== Wallet Information ===")
-        print(f"Derivation Path: {wallet['derivation_path']}")
-        print(f"XPRV: {wallet['xprv']}")
-        print(f"XPUB: {wallet['xpub']}")
-        print("\nReceive Addresses:")
-        for i, address in enumerate(wallet['receive_addresses']):
-            print(f"{i+1}. {address}")
-        print("\nEncrypted wallet data saved to: wallet.encrypted")
-        print("QR codes generated in: qr_codes/")
+        # Parse command line arguments
+        parser = argparse.ArgumentParser(description='Bitcoin SV Wallet Generator')
+        parser.add_argument('--decrypt', action='store_true', help='Decrypt an existing wallet')
+        args = parser.parse_args()
+
+        if args.decrypt:
+            # Decryption mode
+            print("\n=== Wallet Decryption ===")
+            
+            # Get encrypted data
+            if os.path.exists('wallet.encrypted'):
+                with open('wallet.encrypted', 'r') as f:
+                    encrypted_data = f.read()
+            else:
+                encrypted_data = input("Enter encrypted wallet data: ")
+            
+            # Get password
+            password = getpass.getpass("Enter wallet password: ")
+            if not password:
+                raise ValueError("Password cannot be empty")
+            
+            # Decrypt wallet data
+            try:
+                wallet_data = decrypt_wallet_data(encrypted_data, password)
+                
+                # Display decrypted information
+                print("\n=== Decrypted Wallet Information ===")
+                print(f"Mnemonic: {wallet_data['mnemonic']}")
+                print(f"Derivation Path: {wallet_data['derivation_path']}")
+                print(f"XPRV: {wallet_data['xprv']}")
+                print(f"XPUB: {wallet_data['xpub']}")
+                print("\nReceive Addresses:")
+                for i, address in enumerate(wallet_data['receive_addresses']):
+                    print(f"{i+1}. {address}")
+                
+                # Generate QR codes for decrypted data
+                generate_qr_codes(wallet_data)
+                print("\nQR codes generated in: qr_codes/")
+                
+            except Exception as e:
+                print(f"Error: {str(e)}")
+                sys.exit(1)
+        else:
+            # Wallet generation mode
+            if not is_offline():
+                print("Warning: Network interfaces detected. For maximum security, consider running offline.")
+            
+            # Generate wallet
+            wallet = generate_wallet()
+            
+            # Get encryption password
+            password = getpass.getpass("Enter a strong password for wallet encryption: ")
+            if not password:
+                raise ValueError("Password cannot be empty")
+            
+            # Encrypt wallet data
+            encrypted_data = encrypt_wallet_data(
+                wallet['mnemonic'],
+                "",  # No passphrase for now
+                wallet['derivation_path'],
+                wallet['xprv'],
+                wallet['xpub'],
+                password
+            )
+            
+            # Save encrypted data
+            with open('wallet.encrypted', 'w') as f:
+                f.write(encrypted_data)
+            
+            # Generate QR codes
+            generate_qr_codes(wallet)
+            
+            # Display wallet information
+            print("\n=== Wallet Information ===")
+            print(f"Derivation Path: {wallet['derivation_path']}")
+            print(f"XPRV: {wallet['xprv']}")
+            print(f"XPUB: {wallet['xpub']}")
+            print("\nReceive Addresses:")
+            for i, address in enumerate(wallet['receive_addresses']):
+                print(f"{i+1}. {address}")
+            print("\nEncrypted wallet data saved to: wallet.encrypted")
+            print("QR codes generated in: qr_codes/")
         
     except Exception as e:
         print(f"Error: {str(e)}")

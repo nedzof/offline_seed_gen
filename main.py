@@ -545,7 +545,7 @@ def generate_qr_codes(wallet: dict, qr_count: int = 1) -> None:
             
             # Add addresses to QR code
             for addr in address_list:
-                qr.add_data(addr + '\n')
+                qr.add_data(str(addr) + '\n')
             
             # Make QR code
             qr.make(fit=True)
@@ -576,12 +576,6 @@ def derive_address(xpub: str, index: int) -> str:
 def main():
     """Main function to run the wallet generator."""
     try:
-        # Print the source code of derive_address for debugging
-        import inspect
-        print("\n--- Source code of derive_address function ---")
-        print(inspect.getsource(derive_address))
-        print("----------------------------------------------\n")
-
         # Parse command line arguments
         parser = argparse.ArgumentParser(description='Bitcoin SV Wallet Generator')
         parser.add_argument('--decrypt', action='store_true', help='Decrypt an existing wallet')

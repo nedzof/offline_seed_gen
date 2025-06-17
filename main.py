@@ -562,8 +562,8 @@ def generate_qr_codes(wallet: dict, qr_count: int = 1) -> None:
 def derive_address(xpub: str, index: int) -> str:
     """Derive a Bitcoin address from an XPUB at the given index."""
     try:
-        # Import the XPUB
-        master_key = BIP32PublicKey.from_extended_key_string(xpub)
+        # Import the XPUB using the correct method
+        master_key = BIP32PublicKey.from_string(xpub)
         
         # Derive the address at the specified index
         child_key = master_key.child_safe(index)

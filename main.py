@@ -249,6 +249,7 @@ def bip39_to_seed(mnemonic: str, passphrase: str = "") -> bytes:
 
 def seed_to_master_key(seed: bytes) -> BIP32PrivateKey:
     """Convert a seed to a master key."""
+    # Use the Bitcoin mainnet network for key derivation
     return BIP32PrivateKey.from_seed(seed, Bitcoin)
 
 def verify_mnemonic_backup(mnemonic: str) -> bool:
@@ -286,48 +287,65 @@ def verify_mnemonic_backup(mnemonic: str) -> bool:
         return False
 
 def get_derivation_path() -> str:
-    """
-    Get the standard Bitcoin SV BIP44 derivation path.
-    
-    Returns:
-        str: The derivation path in the format m/44'/236'/0'/0/0
-    """
-    return "m/44'/236'/0'/0/0"  # BSV BIP44 path
+    """Get the standard BIP44 derivation path for Bitcoin SV."""
+    # Standard BIP44 derivation path for Bitcoin SV account
+    # m/44'/236'/0'
+    # 44' for BIP44
+    # 236' for Bitcoin SV (registered SLIP-0044 coin type)
+    # 0' for the first account
+    return "m/44'/236'/0'"
 
-def generate_wallet() -> dict:
+def generate_wallet(mnemonic_phrase: Optional[str] = None) -> dict:
     """Generate a new wallet."""
     # Generate mnemonic
-    mnemonic = generate_mnemonic()
+    if mnemonic_phrase is None:
+        mnemonic = generate_mnemonic()
+    else:
+        mnemonic = mnemonic_phrase
+
     print(f"\nGenerated mnemonic: {mnemonic}")
-    
-    # Get derivation path
-    derivation_path = get_derivation_path()
     
     # Convert mnemonic to seed
     seed = bip39_to_seed(mnemonic)
     
     # Create master key
-    master_key = seed_to_master_key(seed)
+    master_key_from_seed = seed_to_master_key(seed)
     
-    # Apply derivation path
-    for n in bip32_decompose_chain_string(derivation_path):
-        master_key = master_key.child_safe(n)
+    # Get account derivation path
+    account_derivation_path = get_derivation_path()
     
-    # Get xprv and xpub
-    xprv = master_key.to_extended_key_string()
-    xpub = master_key.public_key.to_extended_key_string()
+    # Derive account master key
+    account_master_key = master_key_from_seed
+    for n in bip32_decompose_chain_string(account_derivation_path):
+        account_master_key = account_master_key.child_safe(n)
     
-    # Generate first 5 receive addresses
+    # Get xprv and xpub for the account master key
+    xprv = account_master_key.to_extended_key_string()
+    xpub = account_master_key.public_key.to_extended_key_string()
+
+    # Print raw extended private key for debugging
+    raw_extended_prv_key = account_master_key._extended_key()
+    print(f"\n--- Debugging Raw Extended Private Key ---")
+    print(f"Raw Extended PRV (hex): {raw_extended_prv_key.hex()}")
+    print(f"------------------------------------------")
+    
+    # Print raw components for debugging
+    print(f"\n--- Debugging Account Master Key Object ---")
+    print(f"Account Master Key Object: {account_master_key}")
+    print(f"---------------------------------------------")
+    
+    # Generate first 5 receive addresses from the account master key
     receive_addresses = []
     for i in range(5):
-        child_key = master_key.child(0).child(i)
+        # Path for receive addresses: m/44'/236'/0'/0/i (relative to account_master_key is 0/i)
+        child_key = account_master_key.child(0).child(i)
         address = child_key.public_key.to_address()
         receive_addresses.append(address)
     
     # Create wallet info
     wallet_info = {
         'mnemonic': mnemonic,
-        'derivation_path': derivation_path,
+        'derivation_path': account_derivation_path,
         'xprv': xprv,
         'xpub': xpub,
         'receive_addresses': receive_addresses
@@ -610,7 +628,7 @@ def main():
                 f.write(encrypted_data)
             
             # Generate QR codes
-            generate_qr_codes(wallet)
+            # generate_qr_codes(wallet) # Temporarily removed for focused output
             
             # Display wallet information
             print("\n=== Wallet Information ===")

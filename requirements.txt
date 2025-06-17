@@ -2,6 +2,6 @@
 pycryptodomex==3.19.0
 qrcode[pil]==7.4.2
 mnemonic==0.20
-bitcoinx==0.9.0
+bitcoinX>=0.2.4,<0.2.5
 psutil==5.9.8
 zxcvbn==4.4.28 

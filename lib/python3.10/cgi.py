@@ -1,6 +1,4 @@
-#!/bin/sh
-'''exec' "$(dirname -- "$(realpath -- "$0")")/python3.10" "$0" "$@"
-' '''
+#! /usr/local/bin/python
 
 # NOTE: the above "/usr/local/bin/python" is NOT a mistake.  It is
 # intentionally NOT "/usr/bin/env python".  On many systems

@@ -253,9 +253,6 @@ sed -e 's/[ 	]*#.*//' -e '/^[ 	]*$/d' |
 		done
 	done
 
-	# Deduplicate OBJS.
-	OBJS=$(echo $OBJS | tr ' ' '\n' | sort -u | xargs)
-
 	case $SHAREDMODS in
 	'')	;;
 	*)	DEFS="SHAREDMODS=$SHAREDMODS$NL$DEFS";;

@@ -461,10 +461,7 @@ if _os.name == "nt":
 elif _sys.platform == "cygwin":
     pythonapi = PyDLL("libpython%d.%d.dll" % _sys.version_info[:2])
 else:
-    try:
-        pythonapi = PyDLL(None)
-    except OSError:
-        pythonapi = None
+    pythonapi = PyDLL(None)
 
 
 if _os.name == "nt":

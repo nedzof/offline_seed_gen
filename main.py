@@ -12,6 +12,8 @@ import secrets
 import ctypes
 from typing import Dict, List, Tuple, Optional
 import socket
+from unicodedata import normalize
+from bitcoinx.bip32 import bip32_decompose_chain_string
 
 # Cryptography and Wallet Libraries
 from Cryptodome.Cipher import AES
@@ -237,19 +239,16 @@ def generate_mnemonic(strength_bits: int = 128, language: str = 'english', entro
     except Exception as e:
         raise Exception(f"Failed to generate mnemonic: {e}")
 
-def mnemonic_to_seed(mnemonic: str, passphrase: str = "") -> bytes:
-    """Convert mnemonic to seed using PBKDF2."""
-    mnemonic_bytes = mnemonic.encode('utf-8')
-    passphrase_bytes = passphrase.encode('utf-8')
-    return hashlib.pbkdf2_hmac(
-        'sha512',
-        mnemonic_bytes,
-        b'mnemonic' + passphrase_bytes,
-        2048
-    )
+def bip39_to_seed(mnemonic: str, passphrase: str = "") -> bytes:
+    """Convert a BIP39 mnemonic to a seed."""
+    PBKDF2_ROUNDS = 2048
+    mnemonic = normalize('NFKD', ' '.join(mnemonic.split()))
+    passphrase = normalize('NFKD', passphrase)
+    return hashlib.pbkdf2_hmac('sha512', mnemonic.encode('utf-8'),
+        b'mnemonic' + passphrase.encode('utf-8'), iterations=PBKDF2_ROUNDS)
 
 def seed_to_master_key(seed: bytes) -> BIP32PrivateKey:
-    """Convert seed to master key using BIP32."""
+    """Convert a seed to a master key."""
     return BIP32PrivateKey.from_seed(seed, Bitcoin)
 
 def verify_mnemonic_backup(mnemonic: str) -> bool:
@@ -296,40 +295,25 @@ def get_derivation_path() -> str:
     return "m/44'/236'/0'/0/0"  # BSV BIP44 path
 
 def generate_wallet() -> dict:
-    """
-    Generate a new wallet with mnemonic phrase and keys.
-    
-    Returns:
-        dict: Wallet information including mnemonic, keys, and addresses
-    """
+    """Generate a new wallet."""
     # Generate mnemonic
     mnemonic = generate_mnemonic()
-    
-    # Display mnemonic and wait for user to write it down
-    print("\n=== IMPORTANT: Write down your mnemonic phrase ===")
-    print("This is your backup phrase. Keep it safe and secret!")
-    print("================================================")
-    print(f"\nYour mnemonic phrase:\n{mnemonic}\n")
-    print("================================================")
-    input("Press Enter after you have written down your mnemonic phrase...")
-    
-    # Verify mnemonic backup
-    if not verify_mnemonic_backup(mnemonic):
-        raise ValueError("Mnemonic verification failed. Please try again.")
-    
-    # Generate seed from mnemonic
-    seed = mnemonic_to_seed(mnemonic)
-    
-    # Generate master key with Bitcoin network
-    master_key = BIP32PrivateKey.from_seed(seed, network=Bitcoin)
+    print(f"\nGenerated mnemonic: {mnemonic}")
     
     # Get derivation path
     derivation_path = get_derivation_path()
     
-    # Derive child key
-    child_key = master_key.child(0).child(0)
+    # Convert mnemonic to seed
+    seed = bip39_to_seed(mnemonic)
     
-    # Get extended keys
+    # Create master key
+    master_key = seed_to_master_key(seed)
+    
+    # Apply derivation path
+    for n in bip32_decompose_chain_string(derivation_path):
+        master_key = master_key.child_safe(n)
+    
+    # Get xprv and xpub
     xprv = master_key.to_extended_key_string()
     xpub = master_key.public_key.to_extended_key_string()
     
@@ -340,13 +324,12 @@ def generate_wallet() -> dict:
         address = child_key.public_key.to_address()
         receive_addresses.append(address)
     
-    # Create wallet info dictionary
+    # Create wallet info
     wallet_info = {
         'mnemonic': mnemonic,
-        'seed': seed.hex(),
+        'derivation_path': derivation_path,
         'xprv': xprv,
         'xpub': xpub,
-        'derivation_path': derivation_path,
         'receive_addresses': receive_addresses
     }
     

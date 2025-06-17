@@ -22,7 +22,8 @@ from Cryptodome.Random import get_random_bytes
 from Cryptodome.Hash import SHA256
 from mnemonic import Mnemonic
 import bitcoinx
-from bitcoinx import BIP32PrivateKey, BIP32PublicKey, Bitcoin, bip32_key_from_string
+from bitcoinx import BIP32PrivateKey, BIP32PublicKey, Bitcoin
+from bitcoinx.bip32 import bip32_key_from_string
 
 # Utility Libraries
 import qrcode
@@ -432,7 +433,6 @@ def decrypt_wallet_data(encrypted_data: str, password: str) -> dict:
         wallet_data = json.loads(data_bytes.decode())
         
         # Regenerate receive addresses from xprv
-        from bitcoinx.bip32 import bip32_key_from_string
         master_key = bip32_key_from_string(wallet_data['xprv'])
         receive_addresses = []
         
@@ -564,10 +564,6 @@ def derive_address(xpub: str, index: int) -> str:
     try:
         # Import the XPUB using the correct method
         master_key = bip32_key_from_string(xpub)
-        
-        # Ensure the key is a public key
-        if not isinstance(master_key, BIP32PublicKey):
-            raise Exception("Provided extended key is not an XPUB.")
         
         # Derive the address at the specified index
         child_key = master_key.child_safe(index)
